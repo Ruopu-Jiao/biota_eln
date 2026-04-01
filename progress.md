@@ -17,10 +17,14 @@
 - Added a local demo-mode auth fallback so the app can be explored without a configured Postgres database.
 - Fixed the sign-in loop by routing demo entry through a host-preserving `/api/demo-login` redirect, ensuring the demo session cookie survives the handoff into the workspace.
 - Re-verified the updated auth flow with `npm run lint`, `npm run typecheck`, `npm run build`, and `npm run test:e2e`.
+- Implemented the first entries/protocols feature slice: repository-scoped protocol drafts, notebook entry drafts, version-backed persistence helpers, and protocol linking inside entries.
+- Added notebook detail views for entries and protocols, plus demo-mode persistence for these records through a local `.local/demo-notebook.json` store so the feature works without a database.
+- Shifted the visual system toward a flatter IDE-like layout by replacing many rounded cards with dividers, rails, and typographic hierarchy across the shell, home view, and settings surface.
+- Re-verified the notebook slice with `npm run prisma:generate --workspace @biota/db`, `npm run lint`, `npm run typecheck`, `npm run build`, and `npm run test:e2e`.
 
 ## In Progress
 
-- Preparing the next development pass after Wave 2, with auth and tenancy now in place.
+- Preparing the next development pass after the entries/protocols foundation, with richer entry editing and reusable block composition now the most valuable next step.
 
 ## Blocked
 
@@ -37,9 +41,12 @@
 - Prisma is pinned to `6.19.0` for now to keep the schema/client workflow straightforward and avoid Prisma 7 driver-adapter overhead during early product development.
 - Local development should stay usable before database setup, so demo-mode auth is a supported fallback for early UI validation.
 - Demo auth redirects must preserve the incoming host to avoid losing session cookies across `127.0.0.1` and `localhost`.
+- The visual language should prefer separators, rails, density, and typographic grouping over stacking features inside heavily rounded cards.
+- Demo-mode feature work can use a local file-backed store when that keeps the no-database experience functional without contaminating the production data architecture.
 
 ## Next
 
-- Start the entries/protocols wave: block editor foundation, entry versioning, protocol library primitives, and reusable protocol insertion.
+- Start the entry editor wave: replace plain-text entry bodies with modular blocks and add first-class protocol block insertion inside the editor canvas.
 - Add real auth UX polish: error handling, sign-out state, and first-run account bootstrap validation against a live Postgres instance.
 - Expose repository and organization creation/editing flows in the UI now that the data model is in place.
+- Begin entity primitives for plasmids, sgRNAs, primers, and sequence-backed records so entries can link to actual biological objects rather than free text alone.

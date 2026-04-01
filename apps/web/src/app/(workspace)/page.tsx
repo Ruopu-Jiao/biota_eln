@@ -3,7 +3,7 @@ import Link from "next/link";
 const workspaceCards = [
   {
     title: "Recent entries",
-    body: "Protocol drafts, assay logs, and linked experiment notes live here.",
+    body: "Draft experiment records, revisions, and linked scientific context now live in the notebook surface.",
     action: "Open entries",
     href: "/entries",
   },
@@ -15,7 +15,7 @@ const workspaceCards = [
   },
   {
     title: "Protocols",
-    body: "Reusable blocks and pinned procedures will become the library backbone.",
+    body: "Reusable procedure records now have a real library surface and versioned draft model.",
     action: "View protocols",
     href: "/protocols",
   },
@@ -23,132 +23,143 @@ const workspaceCards = [
 
 export default function Home() {
   return (
-    <div className="grid gap-6 lg:grid-cols-[minmax(0,1.35fr)_minmax(320px,0.65fr)]">
-      <section className="rounded-[28px] border border-white/10 bg-white/5 p-6 shadow-[0_24px_90px_rgba(0,0,0,0.35)] backdrop-blur">
-        <div className="flex flex-wrap items-center justify-between gap-4 border-b border-white/10 pb-5">
-          <div>
-            <p className="text-xs uppercase tracking-[0.3em] text-emerald-300/80">
-              Workspace overview
-            </p>
-            <h1 className="mt-2 text-3xl font-semibold tracking-tight text-white">
-              Biota ELN
-            </h1>
-          </div>
-          <div className="rounded-full border border-emerald-400/20 bg-emerald-400/10 px-3 py-1 text-xs font-medium text-emerald-200">
-            Private workspace
+    <div className="grid gap-8 xl:grid-cols-[minmax(0,1.55fr)_minmax(280px,0.75fr)]">
+      <section className="space-y-8">
+        <div className="border-b border-white/10 pb-6">
+          <p className="text-[11px] uppercase tracking-[0.32em] text-emerald-200/70">
+            Workspace overview
+          </p>
+          <div className="mt-3 flex flex-wrap items-end justify-between gap-4">
+            <div>
+              <h1 className="text-3xl font-semibold tracking-tight text-white">
+                Biota ELN
+              </h1>
+              <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-300">
+                The notebook shell is now moving beyond scaffolding: entries and
+                protocols have persisted draft models, detail pages, and a
+                flatter workspace structure.
+              </p>
+            </div>
+            <div className="text-xs uppercase tracking-[0.24em] text-emerald-200/80">
+              Private workspace
+            </div>
           </div>
         </div>
 
-        <div className="mt-6 grid gap-4 md:grid-cols-3">
+        <div className="border-y border-white/10">
           {workspaceCards.map((card) => (
             <article
               key={card.title}
-              className="rounded-2xl border border-white/8 bg-slate-950/60 p-4"
+              className="grid gap-4 border-b border-white/8 px-0 py-5 last:border-b-0 md:grid-cols-[minmax(0,1fr)_auto]"
             >
-              <h2 className="text-sm font-semibold text-white">{card.title}</h2>
-              <p className="mt-2 text-sm leading-6 text-slate-300">
-                {card.body}
-              </p>
-              <Link
-                href={card.href}
-                className="mt-4 inline-flex rounded-full border border-white/10 bg-white/5 px-3 py-1.5 text-sm font-medium text-white transition hover:border-emerald-300/30 hover:bg-emerald-400/10"
-              >
-                {card.action}
-              </Link>
+              <div>
+                <h2 className="text-base font-medium text-white">{card.title}</h2>
+                <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-300">
+                  {card.body}
+                </p>
+              </div>
+              <div className="flex items-start md:items-center">
+                <Link
+                  href={card.href}
+                  className="border border-white/10 px-3 py-2 text-sm font-medium text-white transition hover:border-emerald-300/30 hover:bg-emerald-400/10"
+                >
+                  {card.action}
+                </Link>
+              </div>
             </article>
           ))}
         </div>
 
-        <div className="mt-6 grid gap-4 xl:grid-cols-[1fr_1fr]">
-          <div className="rounded-2xl border border-white/8 bg-slate-950/55 p-4">
-            <p className="text-xs uppercase tracking-[0.25em] text-slate-400">
+        <div className="grid gap-8 lg:grid-cols-2">
+          <section className="border-t border-white/10 pt-4">
+            <p className="text-[11px] uppercase tracking-[0.24em] text-slate-500">
               Active context
             </p>
-            <div className="mt-3 space-y-3 text-sm text-slate-300">
-              <div className="flex items-center justify-between gap-3">
-                <span>Project</span>
-                <span className="font-medium text-white">
-                  Default workspace
-                </span>
+            <dl className="mt-4 space-y-4 text-sm text-slate-300">
+              <div className="flex items-center justify-between gap-3 border-b border-white/8 pb-3">
+                <dt>Project</dt>
+                <dd className="font-medium text-white">Default workspace</dd>
+              </div>
+              <div className="flex items-center justify-between gap-3 border-b border-white/8 pb-3">
+                <dt>Navigator</dt>
+                <dd className="font-medium text-white">Entries</dd>
               </div>
               <div className="flex items-center justify-between gap-3">
-                <span>Navigator</span>
-                <span className="font-medium text-white">Entries</span>
-              </div>
-              <div className="flex items-center justify-between gap-3">
-                <span>Search</span>
-                <span className="font-mono text-xs text-emerald-200">
+                <dt>Search</dt>
+                <dd className="font-mono text-xs text-emerald-200">
                   plasmid OR sgRNA
-                </span>
+                </dd>
               </div>
-            </div>
-          </div>
+            </dl>
+          </section>
 
-          <div className="rounded-2xl border border-white/8 bg-slate-950/55 p-4">
-            <p className="text-xs uppercase tracking-[0.25em] text-slate-400">
+          <section className="border-t border-white/10 pt-4">
+            <p className="text-[11px] uppercase tracking-[0.24em] text-slate-500">
               Quick actions
             </p>
-            <div className="mt-3 grid gap-2">
+            <div className="mt-4 divide-y divide-white/8 border-y border-white/8">
               {[
                 "New entry",
-                "New entity",
+                "New protocol",
                 "Insert protocol block",
                 "Open graph",
               ].map((item) => (
-                <button
+                <div
                   key={item}
-                  type="button"
-                  className="flex items-center justify-between rounded-xl border border-white/8 bg-white/5 px-3 py-2 text-left text-sm text-slate-200 transition hover:border-white/15 hover:bg-white/8"
+                  className="flex items-center justify-between px-0 py-3 text-sm text-slate-200"
                 >
                   <span>{item}</span>
-                  <span className="text-xs text-slate-500">Soon</span>
-                </button>
+                  <span className="text-xs uppercase tracking-[0.22em] text-slate-500">
+                    Soon
+                  </span>
+                </div>
               ))}
             </div>
-          </div>
+          </section>
         </div>
       </section>
 
-      <aside className="space-y-4">
-        <div className="rounded-[28px] border border-white/10 bg-slate-950/70 p-5">
-          <p className="text-xs uppercase tracking-[0.3em] text-slate-500">
+      <aside className="space-y-8 border-l border-white/10 pl-6">
+        <section className="border-b border-white/10 pb-5">
+          <p className="text-[11px] uppercase tracking-[0.32em] text-slate-500">
             Inspector
           </p>
           <h2 className="mt-3 text-lg font-semibold text-white">
             Context panel
           </h2>
           <p className="mt-2 text-sm leading-6 text-slate-300">
-            This area will hold metadata, backlinks, relations, history, and
-            resource actions once the core workflows land.
+            This space will hold metadata, backlinks, relations, and history.
+            It now sits beside real notebook and protocol records instead of
+            placeholder cards.
           </p>
-          <div className="mt-4 space-y-3 text-sm text-slate-300">
-            <div className="rounded-2xl border border-white/8 bg-white/5 p-3">
-              <span className="block text-xs uppercase tracking-[0.2em] text-slate-500">
-                Backlinks
-              </span>
-              <span className="mt-1 block text-white">0 linked resources</span>
-            </div>
-            <div className="rounded-2xl border border-white/8 bg-white/5 p-3">
-              <span className="block text-xs uppercase tracking-[0.2em] text-slate-500">
-                Activity
-              </span>
-              <span className="mt-1 block text-white">
-                Scaffolded workspace ready for entry design
-              </span>
-            </div>
-          </div>
-        </div>
+        </section>
 
-        <div className="rounded-[28px] border border-emerald-400/15 bg-emerald-400/8 p-5">
-          <p className="text-xs uppercase tracking-[0.3em] text-emerald-200/70">
+        <section className="space-y-4">
+          <div className="border-l border-white/10 pl-4 text-sm text-slate-300">
+            <span className="block text-[11px] uppercase tracking-[0.22em] text-slate-500">
+              Backlinks
+            </span>
+            <span className="mt-1 block text-white">0 linked resources</span>
+          </div>
+          <div className="border-l border-white/10 pl-4 text-sm text-slate-300">
+            <span className="block text-[11px] uppercase tracking-[0.22em] text-slate-500">
+              Activity
+            </span>
+            <span className="mt-1 block text-white">
+              Entry and protocol draft foundations are live
+            </span>
+          </div>
+        </section>
+
+        <section className="border-t border-emerald-400/20 pt-5">
+          <p className="text-[11px] uppercase tracking-[0.32em] text-emerald-200/70">
             System note
           </p>
           <p className="mt-3 text-sm leading-6 text-emerald-50/90">
-            The initial shell is intentionally minimal so we can layer in auth,
-            entries, entities, protocols, and sequence tooling without a second
-            visual rewrite.
+            The UI direction is shifting away from nested rounded boxes toward
+            pane dividers, list rows, and restrained surface highlights.
           </p>
-        </div>
+        </section>
       </aside>
     </div>
   );

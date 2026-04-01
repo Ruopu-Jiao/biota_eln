@@ -45,6 +45,19 @@ enum FolderStatus {
   ARCHIVED
 }
 
+enum EntryStatus {
+  DRAFT
+  REVIEW
+  FINAL
+  ARCHIVED
+}
+
+enum ProtocolStatus {
+  DRAFT
+  ACTIVE
+  ARCHIVED
+}
+
 enum PasswordAlgorithm {
   ARGON2ID
 }
@@ -70,6 +83,10 @@ model User {
   ownedWorkspaces      Organization[]        @relation("WorkspaceOwner")
   organizationMembers  OrganizationMember[]
   repositoryMembers    RepositoryMember[]
+  authoredEntries      Entry[]               @relation("EntryAuthor")
+  entryVersions        EntryVersion[]        @relation("EntryVersionAuthor")
+  authoredProtocols    Protocol[]            @relation("ProtocolAuthor")
+  protocolVersions     ProtocolVersion[]     @relation("ProtocolVersionAuthor")
   createdAt            DateTime              @default(now())
   updatedAt            DateTime              @updatedAt
 
@@ -170,6 +187,8 @@ model Repository {
   organization   Organization        @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   members        RepositoryMember[]
   folders        Folder[]
+  entries        Entry[]
+  protocols      Protocol[]
   createdAt      DateTime            @default(now())
   updatedAt      DateTime            @updatedAt
   archivedAt     DateTime?
@@ -204,10 +223,111 @@ model Folder {
   repository     Repository      @relation(fields: [repositoryId], references: [id], onDelete: Cascade)
   parentFolder   Folder?         @relation("FolderTree", fields: [parentFolderId], references: [id], onDelete: Cascade)
   childFolders   Folder[]        @relation("FolderTree")
+  entries        Entry[]
+  protocols      Protocol[]
   createdAt      DateTime        @default(now())
   updatedAt      DateTime        @updatedAt
   archivedAt     DateTime?
 
   @@unique([repositoryId, parentFolderId, slug])
   @@index([repositoryId, parentFolderId])
+}
+
+model Entry {
+  id                  String        @id @default(cuid())
+  repositoryId        String
+  folderId            String?
+  createdById         String
+  title               String
+  slug                String
+  summary             String?
+  status              EntryStatus   @default(DRAFT)
+  latestVersionNumber Int           @default(1)
+  repository          Repository    @relation(fields: [repositoryId], references: [id], onDelete: Cascade)
+  folder              Folder?       @relation(fields: [folderId], references: [id], onDelete: SetNull)
+  createdBy           User          @relation("EntryAuthor", fields: [createdById], references: [id], onDelete: Restrict)
+  versions            EntryVersion[]
+  linkedProtocols     EntryProtocolReference[]
+  createdAt           DateTime      @default(now())
+  updatedAt           DateTime      @updatedAt
+  archivedAt          DateTime?
+
+  @@unique([repositoryId, slug])
+  @@index([repositoryId, updatedAt])
+  @@index([folderId, updatedAt])
+  @@index([createdById, updatedAt])
+}
+
+model EntryVersion {
+  id            String   @id @default(cuid())
+  entryId        String
+  createdById    String
+  versionNumber  Int
+  title          String
+  summary        String?
+  bodyText       String?  @db.Text
+  bodyJson       Json?
+  entry          Entry    @relation(fields: [entryId], references: [id], onDelete: Cascade)
+  createdBy      User     @relation("EntryVersionAuthor", fields: [createdById], references: [id], onDelete: Restrict)
+  createdAt      DateTime @default(now())
+
+  @@unique([entryId, versionNumber])
+  @@index([entryId, createdAt])
+  @@index([createdById, createdAt])
+}
+
+model Protocol {
+  id                  String         @id @default(cuid())
+  repositoryId        String
+  folderId            String?
+  createdById         String
+  title               String
+  slug                String
+  summary             String?
+  status              ProtocolStatus @default(DRAFT)
+  latestVersionNumber Int            @default(1)
+  repository          Repository     @relation(fields: [repositoryId], references: [id], onDelete: Cascade)
+  folder              Folder?        @relation(fields: [folderId], references: [id], onDelete: SetNull)
+  createdBy           User           @relation("ProtocolAuthor", fields: [createdById], references: [id], onDelete: Restrict)
+  versions            ProtocolVersion[]
+  linkedEntries       EntryProtocolReference[]
+  createdAt           DateTime       @default(now())
+  updatedAt           DateTime       @updatedAt
+  archivedAt          DateTime?
+
+  @@unique([repositoryId, slug])
+  @@index([repositoryId, updatedAt])
+  @@index([folderId, updatedAt])
+  @@index([createdById, updatedAt])
+}
+
+model ProtocolVersion {
+  id            String   @id @default(cuid())
+  protocolId     String
+  createdById    String
+  versionNumber  Int
+  title          String
+  summary        String?
+  bodyText       String?  @db.Text
+  bodyJson       Json?
+  protocol       Protocol  @relation(fields: [protocolId], references: [id], onDelete: Cascade)
+  createdBy      User      @relation("ProtocolVersionAuthor", fields: [createdById], references: [id], onDelete: Restrict)
+  createdAt      DateTime  @default(now())
+
+  @@unique([protocolId, versionNumber])
+  @@index([protocolId, createdAt])
+  @@index([createdById, createdAt])
+}
+
+model EntryProtocolReference {
+  id          String    @id @default(cuid())
+  entryId      String
+  protocolId   String
+  sortOrder    Int       @default(0)
+  entry        Entry     @relation(fields: [entryId], references: [id], onDelete: Cascade)
+  protocol     Protocol  @relation(fields: [protocolId], references: [id], onDelete: Cascade)
+  createdAt    DateTime  @default(now())
+
+  @@unique([entryId, protocolId])
+  @@index([protocolId, sortOrder])
 }
