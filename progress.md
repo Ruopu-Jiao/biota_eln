@@ -10,14 +10,18 @@
 - Added baseline CI, Playwright smoke testing, Prisma package scaffolding, shared package placeholders, and monorepo scripts.
 - Verified the foundation with `npm run lint`, `npm run typecheck`, `npm run build`, and `npm run test:e2e`.
 - Initialized the root Git repository on `main`, attached the GitHub remote, and created the initial scaffold commit: `0717fec`.
+- Added a dedicated SSH key for this repo context, configured Git to use it, and successfully pushed `main` to GitHub.
+- Completed the Wave 2 auth and tenancy foundation: NextAuth credentials auth, registration flow, protected/public route groups, Prisma auth tables, organizations, repositories, folders, and workspace helpers.
+- Added authenticated workspace scaffolding to the Settings surface so the current personal workspace and repositories are visible in the UI.
+- Re-verified the Wave 2 state with `npm run lint`, `npm run typecheck`, `npm run build`, `npm run test:e2e`, and `npm run prisma:generate --workspace @biota/db`.
 
 ## In Progress
 
-- Waiting on GitHub authentication so the local scaffold commit can be pushed to `origin/main`.
+- Preparing the next development pass after Wave 2, with auth and tenancy now in place.
 
 ## Blocked
 
-- `git push -u origin main` failed with `Permission denied (publickey)`, so this machine cannot push to `git@github.com:Ruopu-Jiao/biota_eln.git` until SSH access is configured.
+- None currently.
 
 ## Decisions
 
@@ -27,8 +31,10 @@
 - DNA scope for MVP: basic viewer and sequence-aware entities; advanced cloning/alignment deferred.
 - First implementation wave focuses on foundation only.
 - The repository uses a single root `package-lock.json` for workspace installs.
+- Prisma is pinned to `6.19.0` for now to keep the schema/client workflow straightforward and avoid Prisma 7 driver-adapter overhead during early product development.
 
 ## Next
 
-- Configure GitHub SSH access on this machine, then rerun `git push -u origin main`.
-- Start Wave 2: auth, user accounts, organizations, repositories, folders, and permissions.
+- Start the entries/protocols wave: block editor foundation, entry versioning, protocol library primitives, and reusable protocol insertion.
+- Add real auth UX polish: error handling, sign-out state, and first-run account bootstrap validation against a live Postgres instance.
+- Expose repository and organization creation/editing flows in the UI now that the data model is in place.

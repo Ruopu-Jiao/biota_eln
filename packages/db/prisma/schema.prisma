@@ -7,7 +7,207 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-model Placeholder {
-  id        String   @id @default(cuid())
-  createdAt DateTime @default(now())
+enum OrganizationKind {
+  PERSONAL
+  ORGANIZATION
+}
+
+enum OrganizationRole {
+  OWNER
+  ADMIN
+  MEMBER
+}
+
+enum MembershipStatus {
+  ACTIVE
+  INVITED
+  DISABLED
+}
+
+enum RepositoryRole {
+  MAINTAINER
+  WRITER
+  READER
+}
+
+enum RepositoryVisibility {
+  PRIVATE
+  ORGANIZATION
+}
+
+enum RepositoryStatus {
+  ACTIVE
+  ARCHIVED
+}
+
+enum FolderStatus {
+  ACTIVE
+  ARCHIVED
+}
+
+enum PasswordAlgorithm {
+  ARGON2ID
+}
+
+enum AuthProviderType {
+  CREDENTIALS
+  EMAIL
+  OAUTH
+  WEBAUTHN
+}
+
+model User {
+  id                   String                @id @default(cuid())
+  name                 String?
+  email                String                @unique
+  emailVerified        DateTime?
+  image                String?
+  personalWorkspaceId   String?               @unique
+  personalWorkspace    Organization?         @relation("PersonalWorkspace", fields: [personalWorkspaceId], references: [id], onDelete: SetNull)
+  passwordCredential   PasswordCredential?
+  accounts             Account[]
+  sessions             Session[]
+  ownedWorkspaces      Organization[]        @relation("WorkspaceOwner")
+  organizationMembers  OrganizationMember[]
+  repositoryMembers    RepositoryMember[]
+  createdAt            DateTime              @default(now())
+  updatedAt            DateTime              @updatedAt
+
+  @@index([email])
+}
+
+model PasswordCredential {
+  id              String           @id @default(cuid())
+  userId          String           @unique
+  user            User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  algorithm       PasswordAlgorithm @default(ARGON2ID)
+  passwordHash    String
+  passwordVersion Int              @default(1)
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+}
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String?
+  access_token      String?
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String?
+  session_state     String?
+  user              User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+  @@index([userId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model VerificationToken {
+  identifier String
+  token      String
+  expires    DateTime
+
+  @@unique([identifier, token])
+}
+
+model Organization {
+  id                  String               @id @default(cuid())
+  name                String
+  slug                String               @unique
+  kind                OrganizationKind
+  ownerId             String
+  owner               User                 @relation("WorkspaceOwner", fields: [ownerId], references: [id], onDelete: Restrict)
+  personalForUserId   String?              @unique
+  personalForUser     User?                @relation("PersonalWorkspace")
+  members             OrganizationMember[]
+  repositories        Repository[]
+  createdAt           DateTime             @default(now())
+  updatedAt           DateTime             @updatedAt
+  archivedAt          DateTime?
+
+  @@index([ownerId])
+  @@index([kind])
+}
+
+model OrganizationMember {
+  id              String           @id @default(cuid())
+  organizationId  String
+  userId          String
+  role            OrganizationRole
+  status          MembershipStatus @default(ACTIVE)
+  organization    Organization     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user            User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+
+  @@unique([organizationId, userId])
+  @@index([userId])
+  @@index([organizationId, role])
+}
+
+model Repository {
+  id             String              @id @default(cuid())
+  organizationId String
+  name           String
+  slug           String
+  visibility     RepositoryVisibility @default(ORGANIZATION)
+  status         RepositoryStatus     @default(ACTIVE)
+  isDefault      Boolean             @default(false)
+  organization   Organization        @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  members        RepositoryMember[]
+  folders        Folder[]
+  createdAt      DateTime            @default(now())
+  updatedAt      DateTime            @updatedAt
+  archivedAt     DateTime?
+
+  @@unique([organizationId, slug])
+  @@index([organizationId, isDefault])
+}
+
+model RepositoryMember {
+  id           String            @id @default(cuid())
+  repositoryId String
+  userId       String
+  role         RepositoryRole
+  status       MembershipStatus   @default(ACTIVE)
+  repository   Repository        @relation(fields: [repositoryId], references: [id], onDelete: Cascade)
+  user         User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt    DateTime          @default(now())
+  updatedAt    DateTime          @updatedAt
+
+  @@unique([repositoryId, userId])
+  @@index([userId])
+  @@index([repositoryId, role])
+}
+
+model Folder {
+  id             String         @id @default(cuid())
+  repositoryId   String
+  parentFolderId String?
+  name           String
+  slug           String
+  status         FolderStatus    @default(ACTIVE)
+  repository     Repository      @relation(fields: [repositoryId], references: [id], onDelete: Cascade)
+  parentFolder   Folder?         @relation("FolderTree", fields: [parentFolderId], references: [id], onDelete: Cascade)
+  childFolders   Folder[]        @relation("FolderTree")
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+  archivedAt     DateTime?
+
+  @@unique([repositoryId, parentFolderId, slug])
+  @@index([repositoryId, parentFolderId])
 }

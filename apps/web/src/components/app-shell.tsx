@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { signOut } from "next-auth/react";
 import type { ReactNode } from "react";
 
 const primaryNav = [
@@ -24,7 +25,19 @@ function isActive(pathname: string, href: string) {
   return pathname === href || pathname.startsWith(`${href}/`);
 }
 
-export function AppShell({ children }: { children: ReactNode }) {
+type AppShellProps = {
+  children: ReactNode;
+  viewerName?: string;
+  viewerEmail?: string;
+  workspaceLabel?: string;
+};
+
+export function AppShell({
+  children,
+  viewerName = "Biota user",
+  viewerEmail = "",
+  workspaceLabel = "Personal workspace",
+}: AppShellProps) {
   const pathname = usePathname();
 
   return (
@@ -54,8 +67,15 @@ export function AppShell({ children }: { children: ReactNode }) {
               New
             </button>
             <div className="rounded-xl border border-white/8 bg-white/5 px-3 py-2 text-sm text-slate-300">
-              Personal workspace
+              {workspaceLabel}
             </div>
+            <button
+              type="button"
+              onClick={() => signOut({ callbackUrl: "/sign-in" })}
+              className="rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-sm text-slate-200 transition hover:border-white/20 hover:bg-white/10"
+            >
+              Sign out
+            </button>
           </div>
         </div>
       </header>
@@ -122,12 +142,18 @@ export function AppShell({ children }: { children: ReactNode }) {
               <dl className="mt-3 space-y-2 text-sm text-slate-300">
                 <div className="flex items-center justify-between gap-3">
                   <dt>Owner</dt>
-                  <dd className="text-white">Ruopu-Jiao</dd>
+                  <dd className="text-white">{viewerName}</dd>
                 </div>
                 <div className="flex items-center justify-between gap-3">
                   <dt>Status</dt>
                   <dd className="text-emerald-200">Foundation</dd>
                 </div>
+                {viewerEmail ? (
+                  <div className="flex items-center justify-between gap-3">
+                    <dt>Email</dt>
+                    <dd className="truncate text-white">{viewerEmail}</dd>
+                  </div>
+                ) : null}
               </dl>
             </section>
 

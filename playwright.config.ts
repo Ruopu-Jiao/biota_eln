@@ -1,4 +1,6 @@
 const baseURL = process.env.PLAYWRIGHT_BASE_URL ?? "http://127.0.0.1:3000";
+const authSecret =
+  process.env.AUTH_SECRET ?? "playwright-local-auth-secret-for-biota";
 
 const config = {
   testDir: "./tests/e2e",
@@ -20,6 +22,11 @@ const config = {
     url: baseURL,
     reuseExistingServer: !process.env.CI,
     timeout: 120_000,
+    env: {
+      ...process.env,
+      AUTH_SECRET: authSecret,
+      NEXTAUTH_URL: baseURL,
+    },
   },
 };
 
