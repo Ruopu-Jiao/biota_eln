@@ -2,6 +2,7 @@
 
 import { redirect } from "next/navigation";
 import { registerUserWithPersonalWorkspace } from "@biota/db";
+import { isDemoAuthMode } from "@/lib/auth/demo.server";
 import { hashPassword } from "@/lib/auth/password";
 import { registerSchema } from "@/lib/auth/schemas";
 
@@ -10,6 +11,14 @@ function buildRegisterErrorRedirect(message: string) {
 }
 
 export async function registerAction(formData: FormData) {
+  if (isDemoAuthMode()) {
+    redirect(
+      buildRegisterErrorRedirect(
+        "Registration is disabled in local demo mode. Use the demo sign-in instead."
+      )
+    );
+  }
+
   const parsed = registerSchema.safeParse({
     firstName: formData.get("firstName"),
     lastName: formData.get("lastName"),

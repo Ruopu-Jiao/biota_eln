@@ -2,13 +2,17 @@ import type { NextAuthOptions } from "next-auth";
 import CredentialsProvider from "next-auth/providers/credentials";
 import { PrismaAdapter } from "@auth/prisma-adapter";
 import { findUserForCredentials, prisma } from "@biota/db";
+import { getDemoCredentials, getDemoUser, isDemoAuthMode } from "@/lib/auth/demo.server";
 import { signInSchema } from "@/lib/auth/schemas";
 import { verifyPassword } from "@/lib/auth/password";
 
+const demoMode = isDemoAuthMode();
+const demoCredentials = getDemoCredentials();
+
 export const authOptions: NextAuthOptions = {
-  adapter: PrismaAdapter(prisma),
+  adapter: demoMode ? undefined : PrismaAdapter(prisma),
   session: {
-    strategy: "database",
+    strategy: demoMode ? "jwt" : "database",
   },
   pages: {
     signIn: "/sign-in",
@@ -28,6 +32,17 @@ export const authOptions: NextAuthOptions = {
         const parsed = signInSchema.safeParse(credentials);
 
         if (!parsed.success) {
+          return null;
+        }
+
+        if (demoMode) {
+          if (
+            parsed.data.email === demoCredentials.email &&
+            parsed.data.password === demoCredentials.password
+          ) {
+            return getDemoUser();
+          }
+
           return null;
         }
 
@@ -57,9 +72,16 @@ export const authOptions: NextAuthOptions = {
     }),
   ],
   callbacks: {
-    session({ session, user }) {
+    jwt({ token, user }) {
+      if (user?.id) {
+        token.sub = user.id;
+      }
+
+      return token;
+    },
+    session({ session, user, token }) {
       if (session.user) {
-        session.user.id = user.id;
+        session.user.id = user?.id ?? token.sub ?? "unknown-user";
       }
 
       return session;

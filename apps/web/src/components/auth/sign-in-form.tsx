@@ -1,22 +1,57 @@
 "use client";
 
-import { useState, useTransition } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { FormEvent, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { signIn } from "next-auth/react";
 import { AuthField } from "@/components/auth/auth-field";
 import { signInSchema } from "@/lib/auth/schemas";
 import { DEFAULT_AUTH_REDIRECT } from "@/lib/auth/constants";
 
 export function SignInForm() {
-  const router = useRouter();
+  const demoEmail =
+    process.env.NEXT_PUBLIC_BIOTA_DEMO_EMAIL ?? "demo@biota.local";
+  const demoPassword =
+    process.env.NEXT_PUBLIC_BIOTA_DEMO_PASSWORD ?? "biota-demo";
   const searchParams = useSearchParams();
-  const [isPending, startTransition] = useTransition();
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(
-    searchParams.get("error")
+    searchParams.get("error"),
   );
   const registered = searchParams.get("registered") === "1";
+  const demoMode = searchParams.get("demo") === "1";
 
-  async function handleSubmit(formData: FormData) {
+  async function completeSignIn(email: string, password: string) {
+    setErrorMessage(null);
+    setIsSubmitting(true);
+
+    try {
+      const result = await signIn("credentials", {
+        email,
+        password,
+        callbackUrl: DEFAULT_AUTH_REDIRECT,
+        redirect: false,
+      });
+
+      if (result?.error) {
+        setErrorMessage("We couldn't sign you in with those credentials.");
+        return;
+      }
+
+      window.location.assign(result?.url ?? DEFAULT_AUTH_REDIRECT);
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
+
+  async function continueDemoMode() {
+    setErrorMessage(null);
+    setIsSubmitting(true);
+    window.location.assign("/api/demo-login");
+  }
+
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const formData = new FormData(event.currentTarget);
     const parsed = signInSchema.safeParse({
       email: formData.get("email"),
       password: formData.get("password"),
@@ -29,34 +64,28 @@ export function SignInForm() {
       return;
     }
 
-    setErrorMessage(null);
+    if (
+      demoMode &&
+      parsed.data.email === demoEmail &&
+      parsed.data.password === demoPassword
+    ) {
+      await continueDemoMode();
+      return;
+    }
 
-    startTransition(async () => {
-      const result = await signIn("credentials", {
-        email: parsed.data.email,
-        password: parsed.data.password,
-        callbackUrl: DEFAULT_AUTH_REDIRECT,
-        redirect: false,
-      });
-
-      if (result?.error) {
-        setErrorMessage("We couldn't sign you in with those credentials.");
-        return;
-      }
-
-      router.push(result?.url ?? DEFAULT_AUTH_REDIRECT);
-      router.refresh();
-    });
+    await completeSignIn(parsed.data.email, parsed.data.password);
   }
 
   return (
-    <form action={handleSubmit} className="space-y-4">
+    <form onSubmit={handleSubmit} className="space-y-4">
       <AuthField
         label="Email"
         name="email"
         type="email"
         autoComplete="email"
         placeholder="name@lab.org"
+        hint={demoMode ? `Demo: ${demoEmail}` : undefined}
+        defaultValue={demoMode ? demoEmail : undefined}
         required
       />
       <AuthField
@@ -65,6 +94,8 @@ export function SignInForm() {
         type="password"
         autoComplete="current-password"
         placeholder="Enter your password"
+        hint={demoMode ? `Demo: ${demoPassword}` : undefined}
+        defaultValue={demoMode ? demoPassword : undefined}
         required
       />
 
@@ -94,12 +125,27 @@ export function SignInForm() {
         </p>
       ) : null}
 
+      {demoMode ? (
+        <div className="space-y-3 rounded-2xl border border-emerald-400/20 bg-emerald-400/10 px-4 py-3 text-sm text-emerald-50">
+          <p>
+            Demo mode is active. Use the sample credentials below or continue
+            directly into the demo workspace.
+          </p>
+          <a
+            href="/api/demo-login"
+            className="inline-flex w-full items-center justify-center rounded-2xl border border-emerald-300/30 bg-emerald-300/12 px-4 py-3 text-sm font-semibold text-emerald-50 transition hover:bg-emerald-300/18 disabled:cursor-not-allowed disabled:opacity-70"
+          >
+            Continue with demo workspace
+          </a>
+        </div>
+      ) : null}
+
       <button
         type="submit"
         className="inline-flex w-full items-center justify-center rounded-2xl bg-emerald-400 px-4 py-3 text-sm font-semibold text-slate-950 transition hover:bg-emerald-300 disabled:cursor-not-allowed disabled:opacity-70"
-        disabled={isPending}
+        disabled={isSubmitting}
       >
-        {isPending ? "Signing in..." : "Sign in"}
+        {isSubmitting ? "Signing in..." : "Sign in"}
       </button>
     </form>
   );

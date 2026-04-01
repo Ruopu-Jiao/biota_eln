@@ -1,9 +1,15 @@
 import { getWorkspaceSnapshotForUser } from "@biota/db";
+import {
+  getDemoWorkspaceSnapshot,
+  isDemoAuthMode,
+} from "@/lib/auth/demo.server";
 import { requireServerSession } from "@/lib/auth/session";
 
 export default async function SettingsPage() {
   const session = await requireServerSession();
-  const snapshot = await getWorkspaceSnapshotForUser(session.user.id);
+  const snapshot = isDemoAuthMode()
+    ? getDemoWorkspaceSnapshot()
+    : await getWorkspaceSnapshotForUser(session.user.id);
   const workspace = snapshot?.personalWorkspace;
   const repositories = workspace?.repositories ?? [];
   const memberships = snapshot?.organizationMembers ?? [];

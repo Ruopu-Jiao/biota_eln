@@ -1,7 +1,13 @@
 import type { ReactNode } from "react";
 import { getWorkspaceSnapshotForUser } from "@biota/db";
 import { AppShell } from "@/components/app-shell";
+import {
+  getDemoWorkspaceSnapshot,
+  isDemoAuthMode,
+} from "@/lib/auth/demo.server";
 import { requireServerSession } from "@/lib/auth/session";
+
+export const dynamic = "force-dynamic";
 
 export default async function WorkspaceLayout({
   children,
@@ -9,7 +15,9 @@ export default async function WorkspaceLayout({
   children: ReactNode;
 }) {
   const session = await requireServerSession();
-  const snapshot = await getWorkspaceSnapshotForUser(session.user.id);
+  const snapshot = isDemoAuthMode()
+    ? getDemoWorkspaceSnapshot()
+    : await getWorkspaceSnapshotForUser(session.user.id);
 
   return (
     <AppShell

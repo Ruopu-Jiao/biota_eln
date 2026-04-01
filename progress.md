@@ -14,6 +14,9 @@
 - Completed the Wave 2 auth and tenancy foundation: NextAuth credentials auth, registration flow, protected/public route groups, Prisma auth tables, organizations, repositories, folders, and workspace helpers.
 - Added authenticated workspace scaffolding to the Settings surface so the current personal workspace and repositories are visible in the UI.
 - Re-verified the Wave 2 state with `npm run lint`, `npm run typecheck`, `npm run build`, `npm run test:e2e`, and `npm run prisma:generate --workspace @biota/db`.
+- Added a local demo-mode auth fallback so the app can be explored without a configured Postgres database.
+- Fixed the sign-in loop by routing demo entry through a host-preserving `/api/demo-login` redirect, ensuring the demo session cookie survives the handoff into the workspace.
+- Re-verified the updated auth flow with `npm run lint`, `npm run typecheck`, `npm run build`, and `npm run test:e2e`.
 
 ## In Progress
 
@@ -32,6 +35,8 @@
 - First implementation wave focuses on foundation only.
 - The repository uses a single root `package-lock.json` for workspace installs.
 - Prisma is pinned to `6.19.0` for now to keep the schema/client workflow straightforward and avoid Prisma 7 driver-adapter overhead during early product development.
+- Local development should stay usable before database setup, so demo-mode auth is a supported fallback for early UI validation.
+- Demo auth redirects must preserve the incoming host to avoid losing session cookies across `127.0.0.1` and `localhost`.
 
 ## Next
 

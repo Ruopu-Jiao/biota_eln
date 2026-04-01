@@ -39,6 +39,19 @@ export function AppShell({
   workspaceLabel = "Personal workspace",
 }: AppShellProps) {
   const pathname = usePathname();
+  const demoMode = process.env.NEXT_PUBLIC_BIOTA_DEMO_MODE === "true";
+
+  async function handleSignOut() {
+    if (demoMode) {
+      await fetch("/api/demo-logout", {
+        method: "POST",
+      });
+      window.location.assign("/sign-in?demo=1");
+      return;
+    }
+
+    await signOut({ callbackUrl: "/sign-in" });
+  }
 
   return (
     <div className="min-h-screen bg-[radial-gradient(circle_at_top_left,_rgba(16,185,129,0.16),_transparent_28%),radial-gradient(circle_at_top_right,_rgba(14,165,233,0.14),_transparent_24%),linear-gradient(180deg,#020617_0%,#020617_45%,#07111f_100%)] text-slate-100">
@@ -71,7 +84,9 @@ export function AppShell({
             </div>
             <button
               type="button"
-              onClick={() => signOut({ callbackUrl: "/sign-in" })}
+              onClick={() => {
+                void handleSignOut();
+              }}
               className="rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-sm text-slate-200 transition hover:border-white/20 hover:bg-white/10"
             >
               Sign out

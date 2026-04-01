@@ -3,6 +3,8 @@ import { redirect } from "next/navigation";
 import { PublicAuthLayout } from "@/components/auth/public-auth-layout";
 import { getServerAuthSession } from "@/lib/auth/session";
 
+export const dynamic = "force-dynamic";
+
 export default async function AuthLayout({
   children,
 }: {

@@ -1,6 +1,12 @@
 const baseURL = process.env.PLAYWRIGHT_BASE_URL ?? "http://127.0.0.1:3000";
 const authSecret =
   process.env.AUTH_SECRET ?? "playwright-local-auth-secret-for-biota";
+const demoEmail =
+  process.env.NEXT_PUBLIC_BIOTA_DEMO_EMAIL ?? "demo@biota.local";
+const demoPassword =
+  process.env.NEXT_PUBLIC_BIOTA_DEMO_PASSWORD ?? "biota-demo";
+const demoName =
+  process.env.NEXT_PUBLIC_BIOTA_DEMO_NAME ?? "Demo Researcher";
 
 const config = {
   testDir: "./tests/e2e",
@@ -26,6 +32,12 @@ const config = {
       ...process.env,
       AUTH_SECRET: authSecret,
       NEXTAUTH_URL: baseURL,
+      NEXT_PUBLIC_APP_URL: baseURL,
+      BIOTA_DEMO_MODE: "true",
+      NEXT_PUBLIC_BIOTA_DEMO_MODE: "true",
+      NEXT_PUBLIC_BIOTA_DEMO_EMAIL: demoEmail,
+      NEXT_PUBLIC_BIOTA_DEMO_PASSWORD: demoPassword,
+      NEXT_PUBLIC_BIOTA_DEMO_NAME: demoName,
     },
   },
 };
