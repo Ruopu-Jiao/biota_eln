@@ -34,79 +34,89 @@ export default async function ProtocolDetailPage({
 
   return (
     <section className="space-y-8">
-      <div className="border-b border-white/10 pb-6">
+      <div className="border-b border-[color:var(--line)] pb-6">
         <Link
           href="/protocols"
-          className="text-[11px] uppercase tracking-[0.28em] text-slate-500 transition hover:text-slate-300"
+          className="font-mono text-[11px] uppercase tracking-[0.22em] text-[color:var(--text-soft)] transition hover:text-[color:var(--text-primary)]"
         >
           Protocols
         </Link>
-        <div className="mt-3 flex flex-wrap items-end justify-between gap-4">
+        <div className="mt-4 flex flex-wrap items-end justify-between gap-4">
           <div>
-            <h1 className="text-3xl font-semibold tracking-tight text-white">
+            <h1 className="text-3xl font-semibold tracking-[-0.04em] text-[color:var(--text-primary)]">
               {protocol.title}
             </h1>
-            <p className="mt-3 max-w-3xl text-sm leading-6 text-slate-300">
+            <p className="mt-3 max-w-3xl text-sm leading-7 text-[color:var(--text-muted)]">
               {protocol.summary ??
                 "No summary recorded yet for this protocol draft."}
             </p>
           </div>
-          <div className="text-right text-xs uppercase tracking-[0.22em] text-slate-500">
-            <p>{protocol.status}</p>
-            <p className="mt-2">v{protocol.latestVersionNumber}</p>
+          <div className="text-right">
+            <p className="font-mono text-[11px] uppercase tracking-[0.18em] text-[color:var(--text-soft)]">
+              {protocol.status}
+            </p>
+            <p className="mt-2 text-lg font-semibold text-[color:var(--text-primary)]">
+              v{protocol.latestVersionNumber}
+            </p>
           </div>
         </div>
       </div>
 
       <div className="grid gap-8 xl:grid-cols-[minmax(0,1.7fr)_minmax(280px,0.7fr)]">
-        <article className="border border-white/10 bg-black/10">
-          <div className="border-b border-white/10 px-5 py-4">
-            <p className="text-sm font-medium text-white">Procedure body</p>
-            <p className="mt-1 text-sm text-slate-400">
+        <article className="border border-[color:var(--line)] bg-[color:var(--surface-muted)]">
+          <div className="border-b border-[color:var(--line)] px-5 py-4">
+            <p className="text-sm font-medium text-[color:var(--text-primary)]">
+              Procedure body
+            </p>
+            <p className="mt-1 text-sm leading-7 text-[color:var(--text-muted)]">
               Step blocks and reusable protocol insertion will build on this
               versioned foundation in the next wave.
             </p>
           </div>
           <div className="px-5 py-5">
-            <pre className="whitespace-pre-wrap font-sans text-sm leading-7 text-slate-200">
+            <pre className="whitespace-pre-wrap font-sans text-sm leading-8 text-[color:var(--text-primary)]">
               {protocol.bodyText ?? "No body content yet."}
             </pre>
           </div>
         </article>
 
-        <aside className="border-l border-white/10 pl-6">
+        <aside className="border-l border-[color:var(--line)] pl-6">
           <div className="space-y-5">
-            <div className="border-b border-white/10 pb-4">
-              <p className="text-sm font-medium text-white">Procedure metadata</p>
+            <div className="border-b border-[color:var(--line)] pb-4">
+              <p className="text-sm font-medium text-[color:var(--text-primary)]">
+                Procedure metadata
+              </p>
             </div>
-            <dl className="space-y-4 text-sm text-slate-300">
+            <dl className="space-y-4 text-sm text-[color:var(--text-muted)]">
               <div>
-                <dt className="text-[11px] uppercase tracking-[0.24em] text-slate-500">
+                <dt className="font-mono text-[11px] uppercase tracking-[0.16em] text-[color:var(--text-soft)]">
                   Repository
                 </dt>
-                <dd className="mt-1 text-white">{protocol.repositoryName}</dd>
+                <dd className="mt-1 text-[color:var(--text-primary)]">
+                  {protocol.repositoryName}
+                </dd>
               </div>
               <div>
-                <dt className="text-[11px] uppercase tracking-[0.24em] text-slate-500">
+                <dt className="font-mono text-[11px] uppercase tracking-[0.16em] text-[color:var(--text-soft)]">
                   Folder
                 </dt>
-                <dd className="mt-1 text-white">
+                <dd className="mt-1 text-[color:var(--text-primary)]">
                   {protocol.folderName ?? "Unfiled"}
                 </dd>
               </div>
               <div>
-                <dt className="text-[11px] uppercase tracking-[0.24em] text-slate-500">
+                <dt className="font-mono text-[11px] uppercase tracking-[0.16em] text-[color:var(--text-soft)]">
                   Author
                 </dt>
-                <dd className="mt-1 text-white">
+                <dd className="mt-1 text-[color:var(--text-primary)]">
                   {protocol.createdByName ?? "Unknown author"}
                 </dd>
               </div>
               <div>
-                <dt className="text-[11px] uppercase tracking-[0.24em] text-slate-500">
+                <dt className="font-mono text-[11px] uppercase tracking-[0.16em] text-[color:var(--text-soft)]">
                   Updated
                 </dt>
-                <dd className="mt-1 text-white">
+                <dd className="mt-1 text-[color:var(--text-primary)]">
                   {protocolDetailDateFormatter.format(protocol.updatedAt)}
                 </dd>
               </div>

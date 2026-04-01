@@ -25,10 +25,17 @@
 - Entry versions now use `bodyJson` as the source of truth for block content, while `bodyText` is derived as a readable fallback snapshot for compatibility and later search/indexing.
 - Mirrored the block editor flow into demo mode so entry editing, version bumps, and protocol-linked blocks all work without a configured database.
 - Re-verified the structured editor flow with `npm run lint`, `npm run typecheck`, `npm run build`, and `npm run test:e2e`.
+- Reworked the workspace shell around an Obsidian-style file-browser layout: icon-based primary tabs, a repository/folder/entry navigator tree, and flatter pane separators instead of card-heavy chrome.
+- Replaced form-first entry creation with a blank-page flow: `Create new entry` now opens an untitled document immediately and redirects into the entry editor.
+- Expanded the entry document model with markdown-oriented text blocks, table blocks, and derived summaries so entries read more like notebook pages while still saving as structured JSON versions.
+- Added a client-side theme system with three variants inspired by public Obsidian themes: a default dark workspace, a warm light workspace, and a softer alternative dusk theme.
+- Applied the new semantic theme tokens across the core workspace pages so Entries, Protocols, Entities, Graph, Home, Settings, and the shell stay visually consistent.
+- Added notebook navigator helpers for both Prisma-backed and demo-mode data so the left rail can show folders and entries across the workspace.
+- Re-verified this workspace/document pass with `npm run lint`, `npm run typecheck`, `npm run build`, and `npm run test:e2e`.
 
 ## In Progress
 
-- Preparing the next development pass after the structured entry editor, with richer block types, entity references, and protocol-version insertion now the highest-value follow-on work.
+- Preparing the next entry-focused development pass: richer markdown interactions, reliable protocol/table insertion automation coverage, and first entity-linked blocks.
 
 ## Blocked
 
@@ -48,11 +55,14 @@
 - The visual language should prefer separators, rails, density, and typographic grouping over stacking features inside heavily rounded cards.
 - Demo-mode feature work can use a local file-backed store when that keeps the no-database experience functional without contaminating the production data architecture.
 - For entries, `EntryVersion.bodyJson` is now the canonical structured document payload and relation rows like `EntryProtocolReference` are derived from the saved block order.
+- The entries surface should behave like a document editor first and a metadata form second; title remains editable, but summary is now derived from content when it is not explicitly provided.
+- The workspace theme system should be semantic-token driven so dark/light/alternative variants can reuse the same layout language without duplicating component styles.
+- The left navigator should behave like a persistent file browser, even before folder-management UI is exposed.
 
 ## Next
 
-- Start the entry editor wave: replace plain-text entry bodies with modular blocks and add first-class protocol block insertion inside the editor canvas.
-- Add real auth UX polish: error handling, sign-out state, and first-run account bootstrap validation against a live Postgres instance.
-- Expose repository and organization creation/editing flows in the UI now that the data model is in place.
+- Tighten the entry canvas interaction model so protocol and table insertion are both easier to operate manually and easier to cover with end-to-end automation.
+- Add richer markdown conveniences such as split preview, slash-command insertion, and keyboard-first block creation.
 - Begin entity primitives for plasmids, sgRNAs, primers, and sequence-backed records so entries can link to actual biological objects rather than free text alone.
+- Expose folder management and repository organization controls in the UI so the navigator can evolve beyond the default root-folder structure.
 - Add the next block types: entity reference blocks, callout/checklist blocks, and protocol-version snapshots instead of simple protocol references.

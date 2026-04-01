@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { redirect } from "next/navigation";
 import type { EntryBlock } from "@biota/db";
 import {
   createEntryDraftForUser,
@@ -19,6 +20,18 @@ function readOptionalString(formData: FormData, key: string) {
   const value = formData.get(key);
 
   return typeof value === "string" ? value : "";
+}
+
+function readPresentString(formData: FormData, key: string) {
+  const value = formData.get(key);
+
+  return typeof value === "string" ? value : undefined;
+}
+
+function normalizeEntryTitle(value: string | undefined) {
+  const title = value?.trim();
+
+  return title ? title : "Untitled entry";
 }
 
 function revalidateNotebookSurfaces() {
@@ -87,6 +100,29 @@ function parseEntryBlocksJson(formData: FormData): EntryBlock[] {
               protocolId: block.protocolId,
             };
           }
+
+          if (
+            block.type === "table" &&
+            "columns" in block &&
+            "rows" in block &&
+            Array.isArray(block.columns) &&
+            Array.isArray(block.rows)
+          ) {
+            return {
+              id: block.id,
+              type: "table" as const,
+              columns: block.columns.map((column: unknown) =>
+                typeof column === "string" ? column : "",
+              ),
+              rows: block.rows.map((row: unknown) =>
+                Array.isArray(row)
+                  ? row.map((cell: unknown) =>
+                      typeof cell === "string" ? cell : "",
+                    )
+                  : [],
+              ),
+            };
+          }
         }
 
         return null;
@@ -141,46 +177,40 @@ export async function createProtocolDraftAction(formData: FormData) {
 
 export async function createEntryDraftAction(formData: FormData) {
   const session = await requireServerSession();
-  const title = readOptionalString(formData, "title").trim();
-
-  if (!title) {
-    return;
-  }
+  const title = normalizeEntryTitle(readPresentString(formData, "title"));
 
   const input = {
     title,
-    summary: readOptionalString(formData, "summary"),
-    bodyText: readOptionalString(formData, "bodyText"),
+    summary: readPresentString(formData, "summary"),
+    bodyText: readPresentString(formData, "bodyText"),
     linkedProtocolIds: formData
       .getAll("linkedProtocolIds")
       .filter((value): value is string => typeof value === "string"),
   };
 
-  if (isDemoAuthMode()) {
-    await createDemoEntryDraft(input);
-  } else {
-    await createEntryDraftForUser({
-      userId: session.user.id,
-      ...input,
-    });
-  }
+  const entry = isDemoAuthMode()
+    ? await createDemoEntryDraft(input)
+    : await createEntryDraftForUser({
+        userId: session.user.id,
+        ...input,
+      });
 
   revalidateNotebookSurfaces();
+  redirect(`/entries/${entry.id}`);
 }
 
 export async function updateEntryDraftAction(formData: FormData) {
   const session = await requireServerSession();
   const entryId = readOptionalString(formData, "entryId").trim();
-  const title = readOptionalString(formData, "title").trim();
 
-  if (!entryId || !title) {
+  if (!entryId) {
     return;
   }
 
   const input = {
     entryId,
-    title,
-    summary: readOptionalString(formData, "summary"),
+    title: normalizeEntryTitle(readPresentString(formData, "title")),
+    summary: readPresentString(formData, "summary"),
     blocks: parseEntryBlocksJson(formData),
   };
 

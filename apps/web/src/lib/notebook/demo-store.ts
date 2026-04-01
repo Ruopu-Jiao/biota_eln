@@ -7,6 +7,7 @@ import type {
   EntryBlock,
   EntryDetail,
   EntryListItem,
+  NotebookNavigatorData,
   NotebookContext,
   ProtocolDetail,
   ProtocolListItem,
@@ -148,6 +149,13 @@ function deriveBodyText(
         return block.text.trim();
       }
 
+      if (block.type === "table") {
+        const header = block.columns.join("\t");
+        const rows = block.rows.map((row) => row.join("\t")).join("\n");
+
+        return [`Table`, header, rows].filter(Boolean).join("\n");
+      }
+
       const protocol = protocolsById.get(block.protocolId);
       return protocol ? `Protocol: ${protocol.title}` : null;
     })
@@ -156,6 +164,53 @@ function deriveBodyText(
     .trim();
 
   return text || null;
+}
+
+function normalizeSummaryText(value: string) {
+  return value
+    .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1")
+    .replace(/[*_`>#~-]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function truncateSummary(value: string, maxLength = 180) {
+  if (value.length <= maxLength) {
+    return value;
+  }
+
+  return `${value.slice(0, maxLength - 1).trimEnd()}…`;
+}
+
+function deriveSummary(
+  blocks: EntryBlock[],
+  protocolsById: Map<string, DemoStoreProtocol>,
+) {
+  for (const block of blocks) {
+    if (block.type === "text") {
+      const normalized = normalizeSummaryText(block.text);
+
+      if (normalized) {
+        return truncateSummary(normalized);
+      }
+
+      continue;
+    }
+
+    if (block.type === "table") {
+      const columns = block.columns.filter((column) => column.trim());
+      const summary = columns.length
+        ? `Table: ${columns.join(", ")}`
+        : `Table: ${block.columns.length} columns`;
+
+      return truncateSummary(`${summary} (${block.rows.length} rows)`);
+    }
+
+    const protocol = protocolsById.get(block.protocolId);
+    return truncateSummary(`Protocol: ${protocol?.title ?? "Linked protocol"}`);
+  }
+
+  return null;
 }
 
 function getSeedStore(): DemoNotebookStore {
@@ -227,6 +282,37 @@ export function getDemoNotebookContext(): NotebookContext {
       name: "Root",
       slug: "root",
     },
+  };
+}
+
+export async function getDemoNotebookNavigator(): Promise<NotebookNavigatorData> {
+  const store = await ensureDemoStore();
+
+  return {
+    repository: {
+      id: demoRepositoryId,
+      name: "Main notebook",
+      slug: "main",
+    },
+    folders: [
+      {
+        id: demoRootFolderId,
+        name: "Root",
+        slug: "root",
+        parentFolderId: null,
+        entries: store.entries
+          .slice()
+          .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))
+          .map((entry) => ({
+            id: entry.id,
+            title: entry.title,
+            slug: entry.slug,
+            latestVersionNumber: entry.latestVersionNumber,
+          })),
+        childFolders: [],
+      },
+    ],
+    unfiledEntries: [],
   };
 }
 
@@ -340,11 +426,10 @@ export async function createDemoEntryDraft(
     store.protocols.map((protocol) => [protocol.id, protocol]),
   );
 
-  store.entries.unshift({
+  const entry = {
     id: `demo-entry-${crypto.randomUUID()}`,
     title,
     slug,
-    summary: input.summary?.trim() || null,
     status: "DRAFT",
     repositoryName: "Main notebook",
     folderName: "Root",
@@ -354,9 +439,14 @@ export async function createDemoEntryDraft(
     bodyText: deriveBodyText(blocks, protocolsById),
     blocks,
     linkedProtocolIds: deriveLinkedProtocolIds(blocks),
-  });
+    summary: input.summary?.trim() || deriveSummary(blocks, protocolsById),
+  } satisfies DemoStoreEntry;
+
+  store.entries.unshift(entry);
 
   await saveDemoStore(store);
+
+  return entry;
 }
 
 export async function getDemoEntryDetail(
@@ -444,7 +534,7 @@ export async function updateDemoEntryDraft(
   );
 
   entry.title = input.title.trim();
-  entry.summary = input.summary?.trim() || null;
+  entry.summary = input.summary?.trim() || deriveSummary(blocks, protocolsById);
   entry.blocks = blocks;
   entry.bodyText = deriveBodyText(blocks, protocolsById);
   entry.linkedProtocolIds = deriveLinkedProtocolIds(blocks);

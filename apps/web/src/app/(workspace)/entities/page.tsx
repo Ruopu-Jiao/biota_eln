@@ -2,17 +2,17 @@ const entities = ["Plasmids", "gDNA", "sgRNAs", "Primers"];
 
 export default function EntitiesPage() {
   return (
-    <section className="space-y-6">
-      <div>
-        <p className="text-xs uppercase tracking-[0.3em] text-emerald-200/70">
+    <section className="space-y-8">
+      <div className="border-b border-[color:var(--line)] pb-6">
+        <p className="font-mono text-[11px] uppercase tracking-[0.22em] text-[color:var(--accent-strong)]">
           Entities
         </p>
-        <h1 className="mt-2 text-2xl font-semibold text-white">
+        <h1 className="mt-3 text-3xl font-semibold tracking-[-0.04em] text-[color:var(--text-primary)]">
           Biological entity registry
         </h1>
-        <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-300">
+        <p className="mt-3 max-w-2xl text-sm leading-7 text-[color:var(--text-muted)]">
           Typed scientific objects will live here, including sequence-backed
-          records and reusable materials.
+          records and reusable materials linked into notebook pages.
         </p>
       </div>
 
@@ -20,10 +20,12 @@ export default function EntitiesPage() {
         {entities.map((entity) => (
           <div
             key={entity}
-            className="rounded-2xl border border-white/8 bg-white/5 p-4"
+            className="border border-[color:var(--line)] bg-[color:var(--surface-muted)] px-4 py-4"
           >
-            <p className="text-sm font-medium text-white">{entity}</p>
-            <p className="mt-2 text-sm leading-6 text-slate-400">
+            <p className="text-sm font-medium text-[color:var(--text-primary)]">
+              {entity}
+            </p>
+            <p className="mt-2 text-sm leading-7 text-[color:var(--text-muted)]">
               Placeholder entity table and detail view.
             </p>
           </div>

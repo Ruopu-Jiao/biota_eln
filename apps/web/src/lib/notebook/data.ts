@@ -1,5 +1,6 @@
 import {
   getEntryDetailForUser,
+  getNotebookNavigatorForUser,
   getNotebookContextForUser,
   getProtocolDetailForUser,
   listEntriesForUser,
@@ -8,6 +9,7 @@ import {
 import { isDemoAuthMode } from "@/lib/auth/demo.server";
 import {
   getDemoEntryDetail,
+  getDemoNotebookNavigator,
   getDemoNotebookContext,
   getDemoProtocolDetail,
   listDemoEntries,
@@ -60,6 +62,14 @@ export async function getEntryDetailPageData(userId: string, entryId: string) {
     context,
     entry,
   };
+}
+
+export async function getWorkspaceNavigatorData(userId: string) {
+  if (isDemoAuthMode()) {
+    return getDemoNotebookNavigator();
+  }
+
+  return getNotebookNavigatorForUser(userId);
 }
 
 export async function getProtocolDetailPageData(
