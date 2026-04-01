@@ -9,14 +9,15 @@
 - Added an IDE-style Next.js application shell with placeholder routes for Entries, Entities, Protocols, Graph, and Settings.
 - Added baseline CI, Playwright smoke testing, Prisma package scaffolding, shared package placeholders, and monorepo scripts.
 - Verified the foundation with `npm run lint`, `npm run typecheck`, `npm run build`, and `npm run test:e2e`.
+- Initialized the root Git repository on `main`, attached the GitHub remote, and created the initial scaffold commit: `0717fec`.
 
 ## In Progress
 
-- Initializing Git at the repository root, attaching the GitHub remote, and preparing the first scaffold commit.
+- Waiting on GitHub authentication so the local scaffold commit can be pushed to `origin/main`.
 
 ## Blocked
 
-- None currently.
+- `git push -u origin main` failed with `Permission denied (publickey)`, so this machine cannot push to `git@github.com:Ruopu-Jiao/biota_eln.git` until SSH access is configured.
 
 ## Decisions
 
@@ -29,7 +30,5 @@
 
 ## Next
 
-- Initialize the root Git repository on `main`.
-- Add the GitHub remote and create the first scaffold commit.
-- Push the foundation commit if SSH access is available.
+- Configure GitHub SSH access on this machine, then rerun `git push -u origin main`.
 - Start Wave 2: auth, user accounts, organizations, repositories, folders, and permissions.
