@@ -21,10 +21,14 @@
 - Added notebook detail views for entries and protocols, plus demo-mode persistence for these records through a local `.local/demo-notebook.json` store so the feature works without a database.
 - Shifted the visual system toward a flatter IDE-like layout by replacing many rounded cards with dividers, rails, and typographic hierarchy across the shell, home view, and settings surface.
 - Re-verified the notebook slice with `npm run prisma:generate --workspace @biota/db`, `npm run lint`, `npm run typecheck`, `npm run build`, and `npm run test:e2e`.
+- Added the first structured entry editor: ordered text/protocol blocks on the entry detail page, versioned saves, and protocol insertion directly inside the entry canvas.
+- Entry versions now use `bodyJson` as the source of truth for block content, while `bodyText` is derived as a readable fallback snapshot for compatibility and later search/indexing.
+- Mirrored the block editor flow into demo mode so entry editing, version bumps, and protocol-linked blocks all work without a configured database.
+- Re-verified the structured editor flow with `npm run lint`, `npm run typecheck`, `npm run build`, and `npm run test:e2e`.
 
 ## In Progress
 
-- Preparing the next development pass after the entries/protocols foundation, with richer entry editing and reusable block composition now the most valuable next step.
+- Preparing the next development pass after the structured entry editor, with richer block types, entity references, and protocol-version insertion now the highest-value follow-on work.
 
 ## Blocked
 
@@ -43,6 +47,7 @@
 - Demo auth redirects must preserve the incoming host to avoid losing session cookies across `127.0.0.1` and `localhost`.
 - The visual language should prefer separators, rails, density, and typographic grouping over stacking features inside heavily rounded cards.
 - Demo-mode feature work can use a local file-backed store when that keeps the no-database experience functional without contaminating the production data architecture.
+- For entries, `EntryVersion.bodyJson` is now the canonical structured document payload and relation rows like `EntryProtocolReference` are derived from the saved block order.
 
 ## Next
 
@@ -50,3 +55,4 @@
 - Add real auth UX polish: error handling, sign-out state, and first-run account bootstrap validation against a live Postgres instance.
 - Expose repository and organization creation/editing flows in the UI now that the data model is in place.
 - Begin entity primitives for plasmids, sgRNAs, primers, and sequence-backed records so entries can link to actual biological objects rather than free text alone.
+- Add the next block types: entity reference blocks, callout/checklist blocks, and protocol-version snapshots instead of simple protocol references.

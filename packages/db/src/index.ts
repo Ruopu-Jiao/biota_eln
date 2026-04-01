@@ -80,8 +80,24 @@ export interface EntryListItem {
   }>;
 }
 
+export interface EntryTextBlock {
+  id: string;
+  type: "text";
+  text: string;
+}
+
+export interface EntryProtocolBlock {
+  id: string;
+  type: "protocol";
+  protocolId: string;
+  label?: string;
+}
+
+export type EntryBlock = EntryTextBlock | EntryProtocolBlock;
+
 export interface EntryDetail extends EntryListItem {
   bodyText: string | null;
+  blocks: EntryBlock[];
 }
 
 export interface ProtocolListItem {
@@ -107,6 +123,14 @@ export interface CreateEntryDraftInput {
   summary?: string;
   bodyText?: string;
   linkedProtocolIds?: string[];
+}
+
+export interface UpdateEntryDraftInput {
+  userId: string;
+  entryId: string;
+  title: string;
+  summary?: string;
+  blocks: EntryBlock[];
 }
 
 export interface CreateProtocolDraftInput {
@@ -137,6 +161,91 @@ function compactSlug(value: string) {
 
 function preferredSlug(value: string, fallback: string) {
   return compactSlug(value || fallback);
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+function normalizeEntryTextBlock(block: unknown): EntryTextBlock | null {
+  if (!isRecord(block) || block.type !== "text" || typeof block.id !== "string") {
+    return null;
+  }
+
+  return {
+    id: block.id,
+    type: "text",
+    text: typeof block.text === "string" ? block.text : "",
+  };
+}
+
+function normalizeEntryProtocolBlock(
+  block: unknown,
+  allowedProtocolIds?: Set<string>,
+): EntryProtocolBlock | null {
+  if (
+    !isRecord(block) ||
+    block.type !== "protocol" ||
+    typeof block.id !== "string" ||
+    typeof block.protocolId !== "string"
+  ) {
+    return null;
+  }
+
+  if (allowedProtocolIds && !allowedProtocolIds.has(block.protocolId)) {
+    return null;
+  }
+
+  return {
+    id: block.id,
+    type: "protocol",
+    protocolId: block.protocolId,
+    label: typeof block.label === "string" ? block.label : undefined,
+  };
+}
+
+function normalizeEntryBlocks(
+  blocks: unknown,
+  allowedProtocolIds?: Set<string>,
+): EntryBlock[] {
+  if (!Array.isArray(blocks)) {
+    return [];
+  }
+
+  const normalized = blocks
+    .map((block) => {
+      if (isRecord(block) && block.type === "text") {
+        return normalizeEntryTextBlock(block);
+      }
+
+      if (isRecord(block) && block.type === "protocol") {
+        return normalizeEntryProtocolBlock(block, allowedProtocolIds);
+      }
+
+      return null;
+    })
+    .filter((block): block is EntryBlock => Boolean(block))
+    .map((block) =>
+      block.type === "text"
+        ? {
+            ...block,
+            text: block.text.trim(),
+          }
+        : block,
+    )
+    .filter((block) => block.type !== "text" || block.text.length > 0);
+
+  if (!normalized.length) {
+    return [
+      {
+        id: "text-initial",
+        type: "text",
+        text: "",
+      },
+    ];
+  }
+
+  return normalized;
 }
 
 async function uniqueOrganizationSlug(client: DbClient, preferred: string) {
@@ -623,6 +732,114 @@ export async function getNotebookContextForUser(
   return getNotebookContextForUserWithClient(prisma, userId);
 }
 
+function buildLegacyEntryBlocks(
+  bodyText: string | null | undefined,
+  linkedProtocols: Array<{
+    protocol: {
+      id: string;
+      title: string;
+    };
+  }>,
+): EntryBlock[] {
+  const blocks: EntryBlock[] = [];
+
+  if (bodyText?.trim()) {
+    blocks.push({
+      id: "legacy-text",
+      type: "text",
+      text: bodyText.trim(),
+    });
+  }
+
+  for (const [index, reference] of linkedProtocols.entries()) {
+    blocks.push({
+      id: `legacy-protocol-${index + 1}`,
+      type: "protocol",
+      protocolId: reference.protocol.id,
+      label: reference.protocol.title,
+    });
+  }
+
+  if (!blocks.length) {
+    blocks.push({
+      id: "text-initial",
+      type: "text",
+      text: "",
+    });
+  }
+
+  return blocks;
+}
+
+function parseEntryBlocksFromVersion(
+  bodyJson: Prisma.JsonValue | null,
+  bodyText: string | null | undefined,
+  linkedProtocols: Array<{
+    protocol: {
+      id: string;
+      title: string;
+    };
+  }>,
+): EntryBlock[] {
+  const normalized = normalizeEntryBlocks(bodyJson);
+
+  if (normalized.length) {
+    return normalized;
+  }
+
+  return buildLegacyEntryBlocks(bodyText, linkedProtocols);
+}
+
+function getLinkedProtocolIdsFromBlocks(blocks: EntryBlock[]) {
+  return Array.from(
+    new Set(
+      blocks.flatMap((block) =>
+        block.type === "protocol" ? [block.protocolId] : [],
+      ),
+    ),
+  );
+}
+
+function deriveEntryBodyText(
+  blocks: EntryBlock[],
+  protocolTitlesById: Map<string, string>,
+): string | null {
+  const text = blocks
+    .map((block) => {
+      if (block.type === "text") {
+        return block.text.trim();
+      }
+
+      return block.label
+        ? `Protocol: ${block.label}`
+        : protocolTitlesById.has(block.protocolId)
+          ? `Protocol: ${protocolTitlesById.get(block.protocolId)}`
+          : `Protocol: ${block.protocolId}`;
+    })
+    .filter(Boolean)
+    .join("\n\n")
+    .trim();
+
+  return text || null;
+}
+
+function toEntryBlocksJson(blocks: EntryBlock[]): Prisma.InputJsonValue {
+  return blocks.map((block) =>
+    block.type === "text"
+      ? {
+          id: block.id,
+          type: "text",
+          text: block.text,
+        }
+      : {
+          id: block.id,
+          type: "protocol",
+          protocolId: block.protocolId,
+          ...(block.label ? { label: block.label } : {}),
+        },
+  ) as unknown as Prisma.InputJsonValue;
+}
+
 function mapEntryRecord(
   entry: {
     id: string;
@@ -635,7 +852,10 @@ function mapEntryRecord(
     repository: { name: string };
     folder: { name: string } | null;
     createdBy: { name: string | null };
-    versions: Array<{ bodyText: string | null }>;
+    versions: Array<{
+      bodyText: string | null;
+      bodyJson: Prisma.JsonValue | null;
+    }>;
     linkedProtocols: Array<{
       protocol: {
         id: string;
@@ -658,6 +878,11 @@ function mapEntryRecord(
     updatedAt: entry.updatedAt,
     createdByName: entry.createdBy.name,
     bodyText: entry.versions[0]?.bodyText ?? null,
+    blocks: parseEntryBlocksFromVersion(
+      entry.versions[0]?.bodyJson ?? null,
+      entry.versions[0]?.bodyText ?? null,
+      entry.linkedProtocols,
+    ),
     linkedProtocols: entry.linkedProtocols.map((reference) => ({
       id: reference.protocol.id,
       title: reference.protocol.title,
@@ -723,7 +948,7 @@ export async function listEntriesForUser(userId: string): Promise<EntryListItem[
       versions: {
         orderBy: { versionNumber: "desc" },
         take: 1,
-        select: { bodyText: true },
+        select: { bodyText: true, bodyJson: true },
       },
       linkedProtocols: {
         orderBy: { sortOrder: "asc" },
@@ -773,7 +998,7 @@ export async function getEntryDetailForUser(
       versions: {
         orderBy: { versionNumber: "desc" },
         take: 1,
-        select: { bodyText: true },
+        select: { bodyText: true, bodyJson: true },
       },
       linkedProtocols: {
         orderBy: { sortOrder: "asc" },
@@ -820,10 +1045,31 @@ export async function createEntryDraftForUser(input: CreateEntryDraftInput) {
             repositoryId: context.repository.id,
             archivedAt: null,
           },
-          select: { id: true },
+          select: { id: true, title: true },
         })
       : [];
     const linkedProtocolIds = new Set(linkedProtocols.map((protocol) => protocol.id));
+    const blocks = normalizeEntryBlocks(
+      [
+        bodyText
+          ? {
+              id: "text-initial",
+              type: "text",
+              text: bodyText,
+            }
+          : null,
+        ...requestedProtocolIds.map((protocolId, index) => ({
+          id: `protocol-${index + 1}`,
+          type: "protocol",
+          protocolId,
+        })),
+      ].filter(Boolean),
+      linkedProtocolIds,
+    );
+    const protocolTitlesById = new Map(
+      linkedProtocols.map((protocol) => [protocol.id, protocol.title]),
+    );
+    const derivedBodyText = deriveEntryBodyText(blocks, protocolTitlesById);
 
     const entry = await tx.entry.create({
       data: {
@@ -836,7 +1082,7 @@ export async function createEntryDraftForUser(input: CreateEntryDraftInput) {
         status: "DRAFT",
         latestVersionNumber: 1,
         linkedProtocols: {
-          create: requestedProtocolIds
+          create: getLinkedProtocolIdsFromBlocks(blocks)
             .filter((protocolId) => linkedProtocolIds.has(protocolId))
             .map((protocolId, sortOrder) => ({
               protocolId,
@@ -853,11 +1099,97 @@ export async function createEntryDraftForUser(input: CreateEntryDraftInput) {
         versionNumber: 1,
         title,
         summary,
-        bodyText,
+        bodyText: derivedBodyText,
+        bodyJson: toEntryBlocksJson(blocks),
       },
     });
 
     return entry;
+  });
+}
+
+export async function updateEntryDraftForUser(input: UpdateEntryDraftInput) {
+  return prisma.$transaction(async (tx) => {
+    const context = await getNotebookContextForUserWithClient(tx, input.userId);
+
+    if (!context) {
+      throw new Error(`Cannot update an entry for user ${input.userId} without a workspace.`);
+    }
+
+    const entry = await tx.entry.findFirst({
+      where: {
+        id: input.entryId,
+        repositoryId: context.repository.id,
+        archivedAt: null,
+      },
+      select: {
+        id: true,
+        latestVersionNumber: true,
+      },
+    });
+
+    if (!entry) {
+      throw new Error(`Entry ${input.entryId} was not found in the current workspace.`);
+    }
+
+    const title = input.title.trim();
+    const summary = input.summary?.trim() || null;
+    const requestedProtocolIds = getLinkedProtocolIdsFromBlocks(input.blocks);
+    const protocols = requestedProtocolIds.length
+      ? await tx.protocol.findMany({
+          where: {
+            id: { in: requestedProtocolIds },
+            repositoryId: context.repository.id,
+            archivedAt: null,
+          },
+          select: {
+            id: true,
+            title: true,
+          },
+        })
+      : [];
+    const validProtocolIds = new Set(protocols.map((protocol) => protocol.id));
+    const protocolTitlesById = new Map(
+      protocols.map((protocol) => [protocol.id, protocol.title]),
+    );
+    const blocks = normalizeEntryBlocks(input.blocks, validProtocolIds);
+    const nextVersionNumber = entry.latestVersionNumber + 1;
+
+    await tx.entry.update({
+      where: { id: entry.id },
+      data: {
+        title,
+        summary,
+        status: "DRAFT",
+        latestVersionNumber: nextVersionNumber,
+        linkedProtocols: {
+          deleteMany: {},
+          create: getLinkedProtocolIdsFromBlocks(blocks).map(
+            (protocolId, sortOrder) => ({
+              protocolId,
+              sortOrder,
+            }),
+          ),
+        },
+      },
+    });
+
+    await tx.entryVersion.create({
+      data: {
+        entryId: entry.id,
+        createdById: input.userId,
+        versionNumber: nextVersionNumber,
+        title,
+        summary,
+        bodyText: deriveEntryBodyText(blocks, protocolTitlesById),
+        bodyJson: toEntryBlocksJson(blocks),
+      },
+    });
+
+    return {
+      id: entry.id,
+      versionNumber: nextVersionNumber,
+    };
   });
 }
 

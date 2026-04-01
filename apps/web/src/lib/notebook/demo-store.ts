@@ -4,11 +4,13 @@ import { fileURLToPath } from "node:url";
 import type {
   CreateEntryDraftInput,
   CreateProtocolDraftInput,
+  EntryBlock,
   EntryDetail,
   EntryListItem,
   NotebookContext,
   ProtocolDetail,
   ProtocolListItem,
+  UpdateEntryDraftInput,
 } from "@biota/db";
 import {
   demoRepositoryId,
@@ -30,6 +32,7 @@ type DemoStoreEntry = {
   updatedAt: string;
   createdByName: string | null;
   bodyText: string | null;
+  blocks: EntryBlock[];
   linkedProtocolIds: string[];
 };
 
@@ -81,6 +84,80 @@ function uniqueSlug(existingSlugs: string[], preferred: string) {
   return candidate;
 }
 
+function normalizeEntryBlocks(blocks: EntryBlock[] | undefined | null) {
+  const normalized = (blocks ?? [])
+    .map((block) =>
+      block.type === "text"
+        ? {
+            ...block,
+            text: block.text.trim(),
+          }
+        : block,
+    )
+    .filter((block) => block.type !== "text" || block.text.length > 0);
+
+  if (!normalized.length) {
+    return [
+      {
+        id: "text-initial",
+        type: "text" as const,
+        text: "",
+      },
+    ];
+  }
+
+  return normalized;
+}
+
+function buildEntryBlocksForEntry(entry: DemoStoreEntry) {
+  if (entry.blocks?.length) {
+    return normalizeEntryBlocks(entry.blocks);
+  }
+
+  return normalizeEntryBlocks([
+    {
+      id: `${entry.id}-text`,
+      type: "text",
+      text: entry.bodyText ?? "",
+    },
+    ...entry.linkedProtocolIds.map((protocolId, index) => ({
+      id: `${entry.id}-protocol-${index + 1}`,
+      type: "protocol" as const,
+      protocolId,
+    })),
+  ]);
+}
+
+function deriveLinkedProtocolIds(blocks: EntryBlock[]) {
+  return Array.from(
+    new Set(
+      blocks.flatMap((block) =>
+        block.type === "protocol" ? [block.protocolId] : [],
+      ),
+    ),
+  );
+}
+
+function deriveBodyText(
+  blocks: EntryBlock[],
+  protocolsById: Map<string, DemoStoreProtocol>,
+) {
+  const text = blocks
+    .map((block) => {
+      if (block.type === "text") {
+        return block.text.trim();
+      }
+
+      const protocol = protocolsById.get(block.protocolId);
+      return protocol ? `Protocol: ${protocol.title}` : null;
+    })
+    .filter((value): value is string => Boolean(value))
+    .join("\n\n")
+    .trim();
+
+  return text || null;
+}
+
 function getSeedStore(): DemoNotebookStore {
   const protocols = getDemoProtocols().map((protocol) => ({
     ...protocol,
@@ -89,6 +166,21 @@ function getSeedStore(): DemoNotebookStore {
   const entries = getDemoEntries().map((entry, index) => ({
     ...entry,
     updatedAt: entry.updatedAt.toISOString(),
+    blocks: normalizeEntryBlocks([
+      {
+        id: `${entry.id}-text`,
+        type: "text",
+        text: entry.bodyText ?? "",
+      },
+      {
+        id: `${entry.id}-protocol`,
+        type: "protocol",
+        protocolId:
+          index === 0
+            ? "demo-protocol-sgrna-oligo"
+            : "demo-protocol-colony-pcr",
+      },
+    ]),
     linkedProtocolIds:
       index === 0
         ? ["demo-protocol-sgrna-oligo"]
@@ -229,6 +321,24 @@ export async function createDemoEntryDraft(
     compactSlug(title),
   );
   const validProtocolIds = new Set(store.protocols.map((protocol) => protocol.id));
+  const requestedProtocolIds = Array.from(
+    new Set((input.linkedProtocolIds ?? []).filter((id) => validProtocolIds.has(id))),
+  );
+  const blocks = normalizeEntryBlocks([
+    {
+      id: "text-initial",
+      type: "text",
+      text: input.bodyText?.trim() || "",
+    },
+    ...requestedProtocolIds.map((protocolId, index) => ({
+      id: `protocol-${index + 1}`,
+      type: "protocol" as const,
+      protocolId,
+    })),
+  ]);
+  const protocolsById = new Map(
+    store.protocols.map((protocol) => [protocol.id, protocol]),
+  );
 
   store.entries.unshift({
     id: `demo-entry-${crypto.randomUUID()}`,
@@ -241,10 +351,9 @@ export async function createDemoEntryDraft(
     latestVersionNumber: 1,
     updatedAt: now,
     createdByName: "Demo Researcher",
-    bodyText: input.bodyText?.trim() || null,
-    linkedProtocolIds: Array.from(
-      new Set((input.linkedProtocolIds ?? []).filter((id) => validProtocolIds.has(id))),
-    ),
+    bodyText: deriveBodyText(blocks, protocolsById),
+    blocks,
+    linkedProtocolIds: deriveLinkedProtocolIds(blocks),
   });
 
   await saveDemoStore(store);
@@ -275,6 +384,7 @@ export async function getDemoEntryDetail(
     updatedAt: new Date(entry.updatedAt),
     createdByName: entry.createdByName,
     bodyText: entry.bodyText,
+    blocks: buildEntryBlocksForEntry(entry),
     linkedProtocols: entry.linkedProtocolIds
       .map((protocolId) => protocolsById.get(protocolId))
       .filter((protocol): protocol is DemoStoreProtocol => Boolean(protocol))
@@ -309,5 +419,42 @@ export async function getDemoProtocolDetail(
     updatedAt: new Date(protocol.updatedAt),
     createdByName: protocol.createdByName,
     bodyText: protocol.bodyText,
+  };
+}
+
+export async function updateDemoEntryDraft(
+  input: Omit<UpdateEntryDraftInput, "userId">,
+) {
+  const store = await ensureDemoStore();
+  const entry = store.entries.find((record) => record.id === input.entryId);
+
+  if (!entry) {
+    throw new Error(`Demo entry ${input.entryId} was not found.`);
+  }
+
+  const protocolsById = new Map(
+    store.protocols.map((protocol) => [protocol.id, protocol]),
+  );
+  const validProtocolIds = new Set(store.protocols.map((protocol) => protocol.id));
+  const blocks = normalizeEntryBlocks(
+    input.blocks.filter(
+      (block) =>
+        block.type !== "protocol" || validProtocolIds.has(block.protocolId),
+    ),
+  );
+
+  entry.title = input.title.trim();
+  entry.summary = input.summary?.trim() || null;
+  entry.blocks = blocks;
+  entry.bodyText = deriveBodyText(blocks, protocolsById);
+  entry.linkedProtocolIds = deriveLinkedProtocolIds(blocks);
+  entry.latestVersionNumber += 1;
+  entry.updatedAt = new Date().toISOString();
+
+  await saveDemoStore(store);
+
+  return {
+    id: entry.id,
+    versionNumber: entry.latestVersionNumber,
   };
 }

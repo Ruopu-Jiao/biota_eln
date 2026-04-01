@@ -6,6 +6,9 @@ test("demo mode can create a protocol and link it into an entry", async ({
   const nonce = Date.now();
   const protocolTitle = `Demo protocol ${nonce}`;
   const entryTitle = `Demo entry ${nonce}`;
+  const updatedSummary = "Updated summary after block edit.";
+  const updatedPrimaryText = "Edited primary text block for the experiment.";
+  const updatedSecondaryText = "Added a second notes block with follow-up observations.";
 
   await page.goto("/api/demo-login");
   await expect(page).toHaveURL("/");
@@ -35,4 +38,21 @@ test("demo mode can create a protocol and link it into an entry", async ({
 
   await expect(page.locator("body")).toContainText(entryTitle);
   await expect(page.locator("body")).toContainText(protocolTitle);
+
+  await page.getByRole("link", { name: entryTitle }).click();
+
+  await expect(page).toHaveURL(/\/entries\/.+/);
+  await page.getByLabel("Entry summary").fill(updatedSummary);
+  await page.getByLabel("Text block 1").fill(updatedPrimaryText);
+  await page.getByRole("button", { name: "Add text block" }).click();
+  await page.getByLabel("Text block 3").fill(updatedSecondaryText);
+  await page.getByRole("button", { name: "Save entry version" }).click();
+
+  await expect(page.locator("body")).toContainText("v2");
+  await expect(page.locator("body")).toContainText(protocolTitle);
+
+  await page.reload();
+  await expect(page.getByLabel("Entry summary")).toHaveValue(updatedSummary);
+  await expect(page.getByLabel("Text block 1")).toHaveValue(updatedPrimaryText);
+  await expect(page.getByLabel("Text block 3")).toHaveValue(updatedSecondaryText);
 });
