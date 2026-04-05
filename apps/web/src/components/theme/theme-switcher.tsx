@@ -1,8 +1,9 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useSyncExternalStore } from "react";
 
 const storageKey = "biota-theme";
+const themeEventName = "biota-theme-change";
 
 type ThemeName = "obsidian" | "paper" | "mist";
 
@@ -22,32 +23,38 @@ function isThemeName(value: string | null): value is ThemeName {
 function applyTheme(theme: ThemeName) {
   document.documentElement.dataset.theme = theme;
   window.localStorage.setItem(storageKey, theme);
+  window.dispatchEvent(new Event(themeEventName));
+}
+
+function subscribe(callback: () => void) {
+  const handleChange = () => callback();
+
+  window.addEventListener("storage", handleChange);
+  window.addEventListener(themeEventName, handleChange);
+
+  return () => {
+    window.removeEventListener("storage", handleChange);
+    window.removeEventListener(themeEventName, handleChange);
+  };
+}
+
+function getSnapshot(): ThemeName {
+  const storedTheme = window.localStorage.getItem(storageKey);
+  const domTheme = document.documentElement.dataset.theme ?? null;
+
+  if (isThemeName(storedTheme)) {
+    return storedTheme;
+  }
+
+  if (isThemeName(domTheme)) {
+    return domTheme;
+  }
+
+  return "obsidian";
 }
 
 export function ThemeSwitcher() {
-  const [theme, setTheme] = useState<ThemeName>(() => {
-    if (typeof document === "undefined") {
-      return "obsidian";
-    }
-
-    const storedTheme = window.localStorage.getItem(storageKey);
-
-    if (isThemeName(storedTheme)) {
-      return storedTheme;
-    }
-
-    const domTheme = document.documentElement.dataset.theme ?? null;
-
-    if (isThemeName(domTheme)) {
-      return domTheme;
-    }
-
-    return "obsidian";
-  });
-
-  useEffect(() => {
-    applyTheme(theme);
-  }, [theme]);
+  const theme = useSyncExternalStore(subscribe, getSnapshot, () => "obsidian");
 
   return (
     <div className="flex items-center gap-1.5 border border-[color:var(--line)] bg-[color:var(--surface-muted)] px-1.5 py-1">
@@ -59,7 +66,6 @@ export function ThemeSwitcher() {
             key={option.value}
             type="button"
             onClick={() => {
-              setTheme(option.value);
               applyTheme(option.value);
             }}
             className={`px-2.5 py-1.5 text-[11px] uppercase tracking-[0.18em] transition ${

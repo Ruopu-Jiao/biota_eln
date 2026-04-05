@@ -32,14 +32,17 @@
 - Applied the new semantic theme tokens across the core workspace pages so Entries, Protocols, Entities, Graph, Home, Settings, and the shell stay visually consistent.
 - Added notebook navigator helpers for both Prisma-backed and demo-mode data so the left rail can show folders and entries across the workspace.
 - Re-verified this workspace/document pass with `npm run lint`, `npm run typecheck`, `npm run build`, and `npm run test:e2e`.
+- Refactored the entry workspace shell into a collapsible navigator with persistent open-entry tabs, moved entry metadata into secondary subtabs, and made the theme switcher hydration-safe.
+- Removed the always-on global inspector from entry routes, collapsed the entry detail view into document-first subtabs, and simplified the insert toolbar to icon-first controls so entries open more like blank writing pages.
+- Tightened the entry detail UX further by hiding the global inspector on entry routes, maximizing document space, and turning the page into a document-first surface with Document/Metadata/Protocols subtabs and a minimal icon-led editor toolbar.
 
 ## In Progress
 
-- Preparing the next entry-focused development pass: richer markdown interactions, reliable protocol/table insertion automation coverage, and first entity-linked blocks.
+- Preparing the next entry-focused development pass: richer markdown interactions, reliable protocol/table insertion automation coverage, and first entity-linked blocks now that the document-first entry shell is in place.
 
 ## Blocked
 
-- None currently.
+- Repository-wide TypeScript issues remain in `apps/web` settings and `packages/db`, so full typecheck/build still fail outside the entry/shell lane.
 
 ## Decisions
 
