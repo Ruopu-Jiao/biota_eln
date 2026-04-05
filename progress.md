@@ -34,6 +34,7 @@
 - Re-verified this workspace/document pass with `npm run lint`, `npm run typecheck`, `npm run build`, and `npm run test:e2e`.
 - Refactored the entry workspace shell into a collapsible navigator with persistent open-entry tabs, moved entry metadata into secondary subtabs, and made the theme switcher hydration-safe.
 - Removed the always-on global inspector from entry routes, collapsed the entry detail view into document-first subtabs, and simplified the insert toolbar to icon-first controls so entries open more like blank writing pages.
+- Added the first SnapGene-inspired DNA viewer foundation on the Entities route with synchronized map and sequence panes, circular and linear topology, reverse-complement/origin controls, feature filtering, motif search, and seams for alignments, traces, primer design, restriction analysis, and cloning history.
 - Tightened the entry detail UX further by hiding the global inspector on entry routes, maximizing document space, and turning the page into a document-first surface with Document/Metadata/Protocols subtabs and a minimal icon-led editor toolbar.
 
 ## In Progress
