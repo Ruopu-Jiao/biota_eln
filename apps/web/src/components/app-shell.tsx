@@ -1,13 +1,101 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { signOut } from "next-auth/react";
-import { useState, type ReactNode, type SVGProps } from "react";
+import {
+  useEffect,
+  useMemo,
+  useState,
+  useSyncExternalStore,
+  type ReactNode,
+  type SVGProps,
+} from "react";
 import type { NotebookNavigatorData, NotebookNavigatorFolder } from "@biota/db";
 import { ThemeSwitcher } from "@/components/theme/theme-switcher";
 
 type IconProps = SVGProps<SVGSVGElement>;
+
+type NavigatorEntry = {
+  id: string;
+  title: string;
+  latestVersionNumber: number;
+};
+
+const navigatorCollapsedStorageKey = "biota-navigator-collapsed";
+const entryTabsStorageKey = "biota-entry-tabs";
+const workspaceStorageEventName = "biota-workspace-storage";
+
+function subscribeToWorkspaceStorage(callback: () => void) {
+  const handleChange = () => callback();
+
+  window.addEventListener("storage", handleChange);
+  window.addEventListener(workspaceStorageEventName, handleChange);
+
+  return () => {
+    window.removeEventListener("storage", handleChange);
+    window.removeEventListener(workspaceStorageEventName, handleChange);
+  };
+}
+
+function notifyWorkspaceStorageChange() {
+  window.dispatchEvent(new Event(workspaceStorageEventName));
+}
+
+function readNavigatorCollapsedSnapshot() {
+  if (typeof window === "undefined") {
+    return false;
+  }
+
+  const storedValue = window.localStorage.getItem(navigatorCollapsedStorageKey);
+
+  if (storedValue === "1") {
+    return true;
+  }
+
+  if (storedValue === "0") {
+    return false;
+  }
+
+  return /^\/entries\/[^/]+$/.test(window.location.pathname);
+}
+
+function writeNavigatorCollapsedSnapshot(collapsed: boolean) {
+  window.localStorage.setItem(
+    navigatorCollapsedStorageKey,
+    collapsed ? "1" : "0",
+  );
+  notifyWorkspaceStorageChange();
+}
+
+function readEntryTabsSnapshot() {
+  if (typeof window === "undefined") {
+    return "[]";
+  }
+
+  return window.localStorage.getItem(entryTabsStorageKey) ?? "[]";
+}
+
+function parseEntryTabsSnapshot(snapshot: string) {
+  try {
+    const parsed = JSON.parse(snapshot) as unknown;
+
+    if (!Array.isArray(parsed)) {
+      return [] as string[];
+    }
+
+    return parsed.filter(
+      (entryId): entryId is string => typeof entryId === "string",
+    );
+  } catch {
+    return [] as string[];
+  }
+}
+
+function writeEntryTabsSnapshot(entryIds: string[]) {
+  window.localStorage.setItem(entryTabsStorageKey, JSON.stringify(entryIds));
+  notifyWorkspaceStorageChange();
+}
 
 function NotebookIcon(props: IconProps) {
   return (
@@ -106,6 +194,16 @@ function EntryIcon(props: IconProps) {
   );
 }
 
+function TabIcon(props: IconProps) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" {...props}>
+      <path d="M5.5 6.75h13v10.5h-13z" />
+      <path d="M5.5 10.25h13" />
+      <path d="M9 6.75v10.5" />
+    </svg>
+  );
+}
+
 const primaryNav = [
   { label: "Entries", href: "/entries", Icon: NotebookIcon },
   { label: "Entities", href: "/entities", Icon: HelixIcon },
@@ -123,8 +221,12 @@ function titleFromPath(pathname: string) {
     return "Workspace";
   }
 
+  if (pathname === "/entries") {
+    return "Notebook";
+  }
+
   if (pathname.startsWith("/entries/")) {
-    return "Entry";
+    return "Entry workspace";
   }
 
   if (pathname.startsWith("/protocols/")) {
@@ -132,6 +234,12 @@ function titleFromPath(pathname: string) {
   }
 
   return pathname.slice(1).replaceAll("/", " / ");
+}
+
+function getEntryIdFromPath(pathname: string) {
+  const match = pathname.match(/^\/entries\/([^/]+)/);
+
+  return match?.[1] ?? null;
 }
 
 function collectFolderState(
@@ -148,6 +256,32 @@ function collectFolderState(
 
     return state;
   }, {});
+}
+
+function collectNavigatorEntryMap(
+  navigator: NotebookNavigatorData | null,
+): Map<string, NavigatorEntry> {
+  const entryMap = new Map<string, NavigatorEntry>();
+
+  function addEntries(entries: NavigatorEntry[]) {
+    for (const entry of entries) {
+      entryMap.set(entry.id, entry);
+    }
+  }
+
+  function walkFolders(folders: NotebookNavigatorFolder[]) {
+    for (const folder of folders) {
+      addEntries(folder.entries as NavigatorEntry[]);
+      walkFolders(folder.childFolders);
+    }
+  }
+
+  if (navigator) {
+    walkFolders(navigator.folders);
+    addEntries(navigator.unfiledEntries as NavigatorEntry[]);
+  }
+
+  return entryMap;
 }
 
 function NavigatorFolderTree({
@@ -233,6 +367,51 @@ type AppShellProps = {
   navigator?: NotebookNavigatorData | null;
 };
 
+function WorkspaceTabButton({
+  active,
+  children,
+  onClick,
+  onClose,
+  closeLabel,
+  title,
+}: {
+  active?: boolean;
+  children: ReactNode;
+  onClick: () => void;
+  onClose?: () => void;
+  closeLabel?: string;
+  title?: string;
+}) {
+  return (
+    <div
+      className={`group inline-flex items-stretch border text-sm transition ${
+        active
+          ? "border-[color:var(--accent-soft)] bg-[color:var(--accent-muted)] text-[color:var(--text-primary)]"
+          : "border-[color:var(--line)] bg-[color:var(--surface-muted)] text-[color:var(--text-muted)] hover:border-[color:var(--line-strong)] hover:text-[color:var(--text-primary)]"
+      }`}
+      title={title}
+    >
+      <button
+        type="button"
+        onClick={onClick}
+        className="flex min-w-0 items-center gap-2 px-3 py-2 text-left"
+      >
+        {children}
+      </button>
+      {onClose ? (
+        <button
+          type="button"
+          onClick={onClose}
+          aria-label={closeLabel}
+          className="border-l border-[color:var(--line)] px-2.5 text-[11px] text-[color:var(--text-soft)] transition hover:bg-[color:var(--surface)] hover:text-[color:var(--text-primary)]"
+        >
+          ×
+        </button>
+      ) : null}
+    </div>
+  );
+}
+
 export function AppShell({
   children,
   viewerName = "Biota user",
@@ -241,10 +420,83 @@ export function AppShell({
   navigator = null,
 }: AppShellProps) {
   const pathname = usePathname();
+  const router = useRouter();
   const demoMode = process.env.NEXT_PUBLIC_BIOTA_DEMO_MODE === "true";
+  const entryIdFromPath = getEntryIdFromPath(pathname);
+  const isEntryDetailRoute = Boolean(entryIdFromPath);
+  const showInspector = !isEntryDetailRoute;
+  const entryMap = useMemo(() => collectNavigatorEntryMap(navigator), [navigator]);
+  const navigatorCollapsed = useSyncExternalStore(
+    subscribeToWorkspaceStorage,
+    readNavigatorCollapsedSnapshot,
+    () => isEntryDetailRoute,
+  );
+  const storedEntryTabsSnapshot = useSyncExternalStore(
+    subscribeToWorkspaceStorage,
+    readEntryTabsSnapshot,
+    () => "[]",
+  );
+  const storedEntryIds = useMemo(
+    () => parseEntryTabsSnapshot(storedEntryTabsSnapshot),
+    [storedEntryTabsSnapshot],
+  );
+  const openEntryIds = useMemo(() => {
+    const entryIds = entryIdFromPath
+      ? [...storedEntryIds, entryIdFromPath]
+      : [...storedEntryIds];
+
+    return entryIds.filter(
+      (entryId, index, currentEntryIds) =>
+        currentEntryIds.indexOf(entryId) === index,
+    );
+  }, [entryIdFromPath, storedEntryIds]);
   const [openByFolderId, setOpenByFolderId] = useState<Record<string, boolean>>(
     () => collectFolderState(navigator?.folders ?? []),
   );
+
+  useEffect(() => {
+    if (!entryIdFromPath) {
+      return;
+    }
+
+    const storedIds = parseEntryTabsSnapshot(readEntryTabsSnapshot());
+
+    if (storedIds.includes(entryIdFromPath)) {
+      return;
+    }
+
+    writeEntryTabsSnapshot([...storedIds, entryIdFromPath]);
+  }, [entryIdFromPath]);
+
+  const workspaceTabs = useMemo(() => {
+    const tabs = [
+      {
+        id: "notebook",
+        title: "Notebook",
+        href: "/entries",
+        active: pathname === "/entries",
+        closable: false,
+        version: null as number | null,
+      },
+      ...openEntryIds.map((entryId) => {
+        const entry = entryMap.get(entryId);
+
+        return {
+          id: entryId,
+          title: entry?.title ?? "Entry",
+          href: `/entries/${entryId}`,
+          active: pathname === `/entries/${entryId}`,
+          closable: true,
+          version: entry?.latestVersionNumber ?? null,
+        };
+      }),
+    ];
+
+    return tabs.filter(
+      (tab, index, currentTabs) =>
+        currentTabs.findIndex((candidate) => candidate.id === tab.id) === index,
+    );
+  }, [entryMap, openEntryIds, pathname]);
 
   async function handleSignOut() {
     if (demoMode) {
@@ -256,6 +508,20 @@ export function AppShell({
     }
 
     await signOut({ callbackUrl: "/sign-in" });
+  }
+
+  function closeEntryTab(entryId: string) {
+    const remainingTabs = openEntryIds.filter(
+      (currentEntryId) => currentEntryId !== entryId,
+    );
+
+    writeEntryTabsSnapshot(remainingTabs);
+
+    if (entryIdFromPath === entryId) {
+      const nextEntryId = remainingTabs.at(-1);
+
+      router.push(nextEntryId ? `/entries/${nextEntryId}` : "/entries");
+    }
   }
 
   return (
@@ -285,6 +551,16 @@ export function AppShell({
 
           <div className="flex items-center gap-2 pl-4">
             <ThemeSwitcher />
+            <button
+              type="button"
+              onClick={() => {
+                writeNavigatorCollapsedSnapshot(!navigatorCollapsed);
+              }}
+              className="inline-flex items-center gap-2 border border-[color:var(--line)] px-3 py-2 text-sm text-[color:var(--text-muted)] transition hover:border-[color:var(--line-strong)] hover:text-[color:var(--text-primary)]"
+            >
+              <ChevronIcon open={!navigatorCollapsed} className="h-4 w-4" />
+              <span>{navigatorCollapsed ? "Show navigator" : "Collapse navigator"}</span>
+            </button>
             <Link
               href="/entries"
               className="inline-flex items-center border border-[color:var(--line)] px-3 py-2 text-sm text-[color:var(--text-muted)] transition hover:border-[color:var(--line-strong)] hover:text-[color:var(--text-primary)]"
@@ -307,7 +583,18 @@ export function AppShell({
         </div>
       </header>
 
-      <div className="grid min-h-[calc(100vh-4rem)] grid-cols-[72px_minmax(240px,320px)_minmax(0,1fr)_minmax(260px,320px)]">
+      <div
+        className="grid min-h-[calc(100vh-4rem)]"
+        style={{
+          gridTemplateColumns: navigatorCollapsed
+            ? showInspector
+              ? "72px minmax(0,1fr) minmax(260px,320px)"
+              : "72px minmax(0,1fr)"
+            : showInspector
+              ? "72px minmax(240px,320px) minmax(0,1fr) minmax(260px,320px)"
+              : "72px minmax(240px,320px) minmax(0,1fr)",
+        }}
+      >
         <aside className="border-r border-[color:var(--line)] bg-[color:var(--surface-muted)] px-2 py-4">
           <div className="space-y-2">
             {primaryNav.map((item) => {
@@ -318,138 +605,177 @@ export function AppShell({
                 <Link
                   key={item.href}
                   href={item.href}
-                  className={`flex h-11 items-center justify-center border transition ${
+                  className={`group relative flex h-11 items-center justify-center border transition ${
                     active
                       ? "border-[color:var(--accent-soft)] bg-[color:var(--accent-muted)] text-[color:var(--text-primary)]"
                       : "border-[color:var(--line)] text-[color:var(--text-muted)] hover:border-[color:var(--line-strong)] hover:text-[color:var(--text-primary)]"
                   }`}
                   aria-label={item.label}
-                  title={item.label}
                 >
                   <Icon className="h-5 w-5" />
+                  <span className="pointer-events-none absolute left-full top-1/2 z-20 ml-3 -translate-y-1/2 whitespace-nowrap border border-[color:var(--line)] bg-[color:var(--surface-strong)] px-2 py-1 text-[11px] uppercase tracking-[0.16em] text-[color:var(--text-muted)] opacity-0 shadow-lg transition group-hover:opacity-100 group-focus-visible:opacity-100">
+                    {item.label}
+                  </span>
                 </Link>
               );
             })}
           </div>
         </aside>
 
-        <aside className="border-r border-[color:var(--line)] bg-[color:var(--surface)] px-4 py-5">
-          <div className="flex items-center justify-between gap-3 border-b border-[color:var(--line)] pb-3">
-            <div>
-              <p className="font-mono text-[11px] uppercase tracking-[0.24em] text-[color:var(--text-soft)]">
-                Navigator
-              </p>
-              <p className="mt-1 text-sm text-[color:var(--text-muted)]">
-                {navigator?.repository.name ?? "Main notebook"}
-              </p>
-            </div>
-            <span className="font-mono text-[10px] uppercase tracking-[0.16em] text-[color:var(--text-soft)]">
-              Files
-            </span>
-          </div>
-
-          <div className="mt-4 space-y-1">
-            {navigator?.folders.length ? (
-              navigator.folders.map((folder) => (
-                <NavigatorFolderTree
-                  key={folder.id}
-                  folder={folder}
-                  pathname={pathname}
-                  depth={0}
-                  openByFolderId={openByFolderId}
-                  onToggle={(folderId) => {
-                    setOpenByFolderId((current) => ({
-                      ...current,
-                      [folderId]: !(current[folderId] ?? true),
-                    }));
-                  }}
-                />
-              ))
-            ) : (
-              <p className="px-2 py-4 text-sm leading-7 text-[color:var(--text-soft)]">
-                Folders and entries will appear here as the notebook grows.
-              </p>
-            )}
-
-            {navigator?.unfiledEntries.length ? (
-              <div className="border-t border-[color:var(--line)] pt-3">
-                <p className="px-2 text-[11px] uppercase tracking-[0.18em] text-[color:var(--text-soft)]">
-                  Unfiled
+        {!navigatorCollapsed ? (
+          <aside className="border-r border-[color:var(--line)] bg-[color:var(--surface)] px-4 py-5">
+            <div className="flex items-center justify-between gap-3 border-b border-[color:var(--line)] pb-3">
+              <div>
+                <p className="font-mono text-[11px] uppercase tracking-[0.24em] text-[color:var(--text-soft)]">
+                  Navigator
                 </p>
-                <div className="mt-2 space-y-0.5">
-                  {navigator.unfiledEntries.map((entry) => {
-                    const active = pathname === `/entries/${entry.id}`;
-
-                    return (
-                      <Link
-                        key={entry.id}
-                        href={`/entries/${entry.id}`}
-                        className={`flex items-center gap-2 px-2 py-1.5 text-sm transition ${
-                          active
-                            ? "bg-[color:var(--accent-muted)] text-[color:var(--text-primary)]"
-                            : "text-[color:var(--text-muted)] hover:text-[color:var(--text-primary)]"
-                        }`}
-                      >
-                        <EntryIcon className="h-4 w-4" />
-                        <span className="truncate">{entry.title}</span>
-                      </Link>
-                    );
-                  })}
-                </div>
+                <p className="mt-1 text-sm text-[color:var(--text-muted)]">
+                  {navigator?.repository.name ?? "Main notebook"}
+                </p>
               </div>
-            ) : null}
-          </div>
-        </aside>
+              <span className="font-mono text-[10px] uppercase tracking-[0.16em] text-[color:var(--text-soft)]">
+                Files
+              </span>
+            </div>
 
-        <main className="px-5 py-5 lg:px-7">
-          <div className="mb-5 flex items-center gap-2 border-b border-[color:var(--line)] pb-4 font-mono text-[11px] uppercase tracking-[0.22em] text-[color:var(--text-soft)]">
-            <span>{titleFromPath(pathname)}</span>
-            <span className="text-[color:var(--line-strong)]">/</span>
-            <span>Workspace</span>
+            <div className="mt-4 space-y-1">
+              {navigator?.folders.length ? (
+                navigator.folders.map((folder) => (
+                  <NavigatorFolderTree
+                    key={folder.id}
+                    folder={folder}
+                    pathname={pathname}
+                    depth={0}
+                    openByFolderId={openByFolderId}
+                    onToggle={(folderId) => {
+                      setOpenByFolderId((current) => ({
+                        ...current,
+                        [folderId]: !(current[folderId] ?? true),
+                      }));
+                    }}
+                  />
+                ))
+              ) : (
+                <p className="px-2 py-4 text-sm leading-7 text-[color:var(--text-soft)]">
+                  Folders and entries will appear here as the notebook grows.
+                </p>
+              )}
+
+              {navigator?.unfiledEntries.length ? (
+                <div className="border-t border-[color:var(--line)] pt-3">
+                  <p className="px-2 text-[11px] uppercase tracking-[0.18em] text-[color:var(--text-soft)]">
+                    Unfiled
+                  </p>
+                  <div className="mt-2 space-y-0.5">
+                    {navigator.unfiledEntries.map((entry) => {
+                      const active = pathname === `/entries/${entry.id}`;
+
+                      return (
+                        <Link
+                          key={entry.id}
+                          href={`/entries/${entry.id}`}
+                          className={`flex items-center gap-2 px-2 py-1.5 text-sm transition ${
+                            active
+                              ? "bg-[color:var(--accent-muted)] text-[color:var(--text-primary)]"
+                              : "text-[color:var(--text-muted)] hover:text-[color:var(--text-primary)]"
+                          }`}
+                        >
+                          <EntryIcon className="h-4 w-4" />
+                          <span className="truncate">{entry.title}</span>
+                        </Link>
+                      );
+                    })}
+                  </div>
+                </div>
+              ) : null}
+            </div>
+          </aside>
+        ) : null}
+
+        <main
+          className={`min-w-0 ${isEntryDetailRoute ? "px-4 py-6 lg:px-8" : "px-5 py-5 lg:px-7"}`}
+        >
+          <div className="mb-5 space-y-3 border-b border-[color:var(--line)] pb-4">
+            {pathname.startsWith("/entries") ? (
+              <div className="flex min-w-0 items-center gap-2 overflow-x-auto pb-1">
+                {workspaceTabs.map((tab) => (
+                  <WorkspaceTabButton
+                    key={tab.id}
+                    active={tab.active}
+                    onClick={() => router.push(tab.href)}
+                    onClose={
+                      tab.closable
+                        ? () => {
+                            closeEntryTab(tab.id);
+                          }
+                        : undefined
+                    }
+                    closeLabel={`Close ${tab.title}`}
+                    title={tab.title}
+                  >
+                    <TabIcon className="h-4 w-4 shrink-0" />
+                    <span className="min-w-0 truncate">{tab.title}</span>
+                    {tab.version ? (
+                      <span className="font-mono text-[10px] uppercase tracking-[0.14em] text-[color:var(--text-soft)]">
+                        v{tab.version}
+                      </span>
+                    ) : null}
+                  </WorkspaceTabButton>
+                ))}
+              </div>
+            ) : (
+              <div className="flex flex-wrap items-center gap-2 font-mono text-[11px] uppercase tracking-[0.22em] text-[color:var(--text-soft)]">
+                <span>{titleFromPath(pathname)}</span>
+                <span className="text-[color:var(--line-strong)]">/</span>
+                <span>Workspace</span>
+              </div>
+            )}
           </div>
           <div>{children}</div>
         </main>
 
-        <aside className="border-l border-[color:var(--line)] bg-[color:var(--surface)] px-4 py-5">
-          <p className="font-mono text-[11px] uppercase tracking-[0.24em] text-[color:var(--text-soft)]">
-            Inspector
-          </p>
-          <div className="mt-4 divide-y divide-[color:var(--line)] border-y border-[color:var(--line)]">
-            <section className="py-4">
-              <h2 className="text-sm font-semibold tracking-[0.06em] text-[color:var(--text-primary)]">
-                Metadata
-              </h2>
-              <dl className="mt-3 space-y-2 text-sm text-[color:var(--text-muted)]">
-                <div className="flex items-center justify-between gap-3">
-                  <dt className="text-[color:var(--text-soft)]">Owner</dt>
-                  <dd className="text-[color:var(--text-primary)]">{viewerName}</dd>
-                </div>
-                <div className="flex items-center justify-between gap-3">
-                  <dt className="text-[color:var(--text-soft)]">Status</dt>
-                  <dd className="text-[color:var(--accent-strong)]">Notebook core</dd>
-                </div>
-                {viewerEmail ? (
+        {showInspector ? (
+          <aside className="border-l border-[color:var(--line)] bg-[color:var(--surface)] px-4 py-5">
+            <p className="font-mono text-[11px] uppercase tracking-[0.24em] text-[color:var(--text-soft)]">
+              Inspector
+            </p>
+            <div className="mt-4 divide-y divide-[color:var(--line)] border-y border-[color:var(--line)]">
+              <section className="py-4">
+                <h2 className="text-sm font-semibold tracking-[0.06em] text-[color:var(--text-primary)]">
+                  Metadata
+                </h2>
+                <dl className="mt-3 space-y-2 text-sm text-[color:var(--text-muted)]">
                   <div className="flex items-center justify-between gap-3">
-                    <dt className="text-[color:var(--text-soft)]">Email</dt>
-                    <dd className="truncate text-[color:var(--text-primary)]">
-                      {viewerEmail}
-                    </dd>
+                    <dt className="text-[color:var(--text-soft)]">Owner</dt>
+                    <dd className="text-[color:var(--text-primary)]">{viewerName}</dd>
                   </div>
-                ) : null}
-              </dl>
-            </section>
+                  <div className="flex items-center justify-between gap-3">
+                    <dt className="text-[color:var(--text-soft)]">Status</dt>
+                    <dd className="text-[color:var(--accent-strong)]">Notebook core</dd>
+                  </div>
+                  {viewerEmail ? (
+                    <div className="flex items-center justify-between gap-3">
+                      <dt className="text-[color:var(--text-soft)]">Email</dt>
+                      <dd className="truncate text-[color:var(--text-primary)]">
+                        {viewerEmail}
+                      </dd>
+                    </div>
+                  ) : null}
+                </dl>
+              </section>
 
-            <section className="py-4">
-              <h2 className="text-sm font-semibold tracking-[0.06em] text-[color:var(--text-primary)]">
-                Focus
-              </h2>
-              <div className="mt-3 space-y-2 text-sm leading-7 text-[color:var(--text-muted)]">
-                <p>Entries are now moving toward a full document workflow.</p>
-                <p>Protocol blocks and tables can live directly inside the page.</p>
-              </div>
-            </section>
-          </div>
-        </aside>
+              <section className="py-4">
+                <h2 className="text-sm font-semibold tracking-[0.06em] text-[color:var(--text-primary)]">
+                  Focus
+                </h2>
+                <div className="mt-3 space-y-2 text-sm leading-7 text-[color:var(--text-muted)]">
+                  <p>Entries are now moving toward a full document workflow.</p>
+                  <p>Protocol blocks and tables can live directly inside the page.</p>
+                </div>
+              </section>
+            </div>
+          </aside>
+        ) : null}
       </div>
     </div>
   );

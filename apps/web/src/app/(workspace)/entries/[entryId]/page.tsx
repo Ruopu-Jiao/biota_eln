@@ -85,46 +85,75 @@ export default async function EntryDetailPage({
   }
 
   const protocolOptions = toProtocolOptions(protocols);
-  const protocolBlocks = entry.blocks.filter((block) => block.type === "protocol");
-  const markdownBlocks = entry.blocks.filter((block) => block.type === "text");
-  const tableBlocks = entry.blocks.filter((block) => block.type === "table");
+  const detailsTabName = `entry-${entry.id}-panel`;
+  const documentTabId = `${detailsTabName}-document`;
+  const metadataTabId = `${detailsTabName}-metadata`;
+  const protocolsTabId = `${detailsTabName}-protocols`;
 
   return (
-    <section className="space-y-8">
-      <header className="border-b border-[color:var(--line)] pb-6">
-        <Link
-          href="/entries"
-          className="font-mono text-[11px] uppercase tracking-[0.22em] text-[color:var(--text-soft)] transition hover:text-[color:var(--text-primary)]"
-        >
-          Entries
-        </Link>
-        <div className="mt-4 flex flex-wrap items-end justify-between gap-4">
-          <div>
-            <p className="font-mono text-[11px] uppercase tracking-[0.2em] text-[color:var(--accent-strong)]">
-              Entry editor
-            </p>
-            <h1 className="mt-2 text-3xl font-semibold tracking-[-0.04em] text-[color:var(--text-primary)]">
-              Page workspace
-            </h1>
-            <p className="mt-3 max-w-3xl text-sm leading-7 text-[color:var(--text-muted)]">
-              This editor now treats the entry like a notebook page instead of a
-              draft form. Use markdown blocks for narrative, insert protocols as
-              reusable method references, and build simple data tables inline.
-            </p>
-          </div>
-          <div className="text-right">
-            <p className="font-mono text-[11px] uppercase tracking-[0.18em] text-[color:var(--text-soft)]">
-              {entry.status}
-            </p>
-            <p className="mt-2 text-lg font-semibold text-[color:var(--text-primary)]">
-              v{entry.latestVersionNumber}
-            </p>
-          </div>
+    <section className="space-y-4">
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[color:var(--line)] pb-3 text-[11px] uppercase tracking-[0.18em] text-[color:var(--text-soft)]">
+        <div className="flex flex-wrap items-center gap-2">
+          <Link
+            href="/entries"
+            className="transition hover:text-[color:var(--text-primary)]"
+          >
+            Entries
+          </Link>
+          <span className="text-[color:var(--line-strong)]">/</span>
+          <span className="text-[color:var(--text-primary)]">{entry.title}</span>
         </div>
-      </header>
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="border border-[color:var(--line)] px-2 py-1">{entry.status}</span>
+          <span className="border border-[color:var(--accent-soft)] bg-[color:var(--accent-muted)] px-2 py-1 text-[color:var(--text-primary)]">
+            v{entry.latestVersionNumber}
+          </span>
+        </div>
+      </div>
 
-      <div className="grid gap-8 xl:grid-cols-[minmax(0,1.75fr)_minmax(280px,0.72fr)]">
-        <article className="border-t border-[color:var(--line)] pt-4">
+      <input
+        id={documentTabId}
+        name={detailsTabName}
+        type="radio"
+        defaultChecked
+        className="peer/document sr-only"
+      />
+      <input
+        id={metadataTabId}
+        name={detailsTabName}
+        type="radio"
+        className="peer/metadata sr-only"
+      />
+      <input
+        id={protocolsTabId}
+        name={detailsTabName}
+        type="radio"
+        className="peer/protocols sr-only"
+      />
+
+      <div className="flex flex-wrap items-center gap-2 border-b border-[color:var(--line)] pb-3 text-[11px] uppercase tracking-[0.18em] text-[color:var(--text-soft)]">
+        <label
+          htmlFor={documentTabId}
+          className="cursor-pointer border border-[color:var(--line)] px-3 py-2 transition hover:text-[color:var(--text-primary)] peer-checked/document:border-[color:var(--accent-soft)] peer-checked/document:bg-[color:var(--accent-muted)] peer-checked/document:text-[color:var(--text-primary)]"
+        >
+          Document
+        </label>
+        <label
+          htmlFor={metadataTabId}
+          className="cursor-pointer border border-[color:var(--line)] px-3 py-2 transition hover:text-[color:var(--text-primary)] peer-checked/metadata:border-[color:var(--accent-soft)] peer-checked/metadata:bg-[color:var(--accent-muted)] peer-checked/metadata:text-[color:var(--text-primary)]"
+        >
+          Metadata
+        </label>
+        <label
+          htmlFor={protocolsTabId}
+          className="cursor-pointer border border-[color:var(--line)] px-3 py-2 transition hover:text-[color:var(--text-primary)] peer-checked/protocols:border-[color:var(--accent-soft)] peer-checked/protocols:bg-[color:var(--accent-muted)] peer-checked/protocols:text-[color:var(--text-primary)]"
+        >
+          Protocols
+        </label>
+      </div>
+
+      <section className="hidden peer-checked/document:block">
+        <article className="min-h-[calc(100vh-13rem)] border-x border-[color:var(--line)] px-6 py-6 lg:px-10 lg:py-8">
           <EntryEditor
             entryId={entry.id}
             initialTitle={entry.title}
@@ -136,112 +165,90 @@ export default async function EntryDetailPage({
             className="space-y-0"
           />
         </article>
+      </section>
 
-        <aside className="space-y-8 border-l border-[color:var(--line)] pl-6">
-          <section className="border-b border-[color:var(--line)] pb-5">
-            <p className="font-mono text-[11px] uppercase tracking-[0.2em] text-[color:var(--text-soft)]">
-              Record metadata
+      <section className="hidden border-x border-[color:var(--line)] px-6 py-6 peer-checked/metadata:block lg:px-10 lg:py-8">
+        <div className="max-w-2xl space-y-6">
+          <div>
+            <p className="font-mono text-[11px] uppercase tracking-[0.18em] text-[color:var(--text-soft)]">
+              Entry metadata
             </p>
-            <dl className="mt-4 space-y-4 text-sm text-[color:var(--text-muted)]">
-              <div>
-                <dt className="font-mono text-[11px] uppercase tracking-[0.16em] text-[color:var(--text-soft)]">
-                  Repository
-                </dt>
-                <dd className="mt-1 text-[color:var(--text-primary)]">
-                  {entry.repositoryName}
-                </dd>
-              </div>
-              <div>
-                <dt className="font-mono text-[11px] uppercase tracking-[0.16em] text-[color:var(--text-soft)]">
-                  Folder
-                </dt>
-                <dd className="mt-1 text-[color:var(--text-primary)]">
-                  {entry.folderName ?? "Unfiled"}
-                </dd>
-              </div>
-              <div>
-                <dt className="font-mono text-[11px] uppercase tracking-[0.16em] text-[color:var(--text-soft)]">
-                  Author
-                </dt>
-                <dd className="mt-1 text-[color:var(--text-primary)]">
-                  {entry.createdByName ?? "Unknown author"}
-                </dd>
-              </div>
-              <div>
-                <dt className="font-mono text-[11px] uppercase tracking-[0.16em] text-[color:var(--text-soft)]">
-                  Updated
-                </dt>
-                <dd className="mt-1 text-[color:var(--text-primary)]">
-                  {entryDetailDateFormatter.format(entry.updatedAt)}
-                </dd>
-              </div>
-            </dl>
-          </section>
+            <h2 className="mt-2 text-2xl font-semibold tracking-[-0.03em] text-[color:var(--text-primary)]">
+              {entry.title}
+            </h2>
+          </div>
 
-          <section className="border-b border-[color:var(--line)] pb-5">
-            <p className="font-mono text-[11px] uppercase tracking-[0.2em] text-[color:var(--text-soft)]">
-              Block summary
-            </p>
-            <div className="mt-4 divide-y divide-[color:var(--line)] border-y border-[color:var(--line)]">
-              <div className="flex items-center justify-between gap-3 py-3 text-sm">
-                <span className="text-[color:var(--text-muted)]">Markdown blocks</span>
-                <span className="text-[color:var(--text-primary)]">
-                  {markdownBlocks.length}
-                </span>
-              </div>
-              <div className="flex items-center justify-between gap-3 py-3 text-sm">
-                <span className="text-[color:var(--text-muted)]">Table blocks</span>
-                <span className="text-[color:var(--text-primary)]">
-                  {tableBlocks.length}
-                </span>
-              </div>
-              <div className="flex items-center justify-between gap-3 py-3 text-sm">
-                <span className="text-[color:var(--text-muted)]">Protocol blocks</span>
-                <span className="text-[color:var(--text-primary)]">
-                  {protocolBlocks.length}
-                </span>
-              </div>
+          <dl className="grid gap-5 text-sm text-[color:var(--text-muted)] sm:grid-cols-2">
+            <div>
+              <dt className="font-mono text-[11px] uppercase tracking-[0.16em] text-[color:var(--text-soft)]">
+                Repository
+              </dt>
+              <dd className="mt-2 text-[color:var(--text-primary)]">{entry.repositoryName}</dd>
             </div>
-          </section>
+            <div>
+              <dt className="font-mono text-[11px] uppercase tracking-[0.16em] text-[color:var(--text-soft)]">
+                Folder
+              </dt>
+              <dd className="mt-2 text-[color:var(--text-primary)]">{entry.folderName ?? "Unfiled"}</dd>
+            </div>
+            <div>
+              <dt className="font-mono text-[11px] uppercase tracking-[0.16em] text-[color:var(--text-soft)]">
+                Author
+              </dt>
+              <dd className="mt-2 text-[color:var(--text-primary)]">{entry.createdByName ?? "Unknown author"}</dd>
+            </div>
+            <div>
+              <dt className="font-mono text-[11px] uppercase tracking-[0.16em] text-[color:var(--text-soft)]">
+                Updated
+              </dt>
+              <dd className="mt-2 text-[color:var(--text-primary)]">{entryDetailDateFormatter.format(entry.updatedAt)}</dd>
+            </div>
+          </dl>
+        </div>
+      </section>
 
-          <section className="border-b border-[color:var(--line)] pb-5">
-            <div className="flex items-center justify-between gap-3">
-              <p className="font-mono text-[11px] uppercase tracking-[0.2em] text-[color:var(--text-soft)]">
-                Linked protocols
+      <section className="hidden border-x border-[color:var(--line)] px-6 py-6 peer-checked/protocols:block lg:px-10 lg:py-8">
+        <div className="max-w-3xl space-y-5">
+          <div>
+            <p className="font-mono text-[11px] uppercase tracking-[0.18em] text-[color:var(--text-soft)]">
+              Linked protocols
+            </p>
+            <h2 className="mt-2 text-2xl font-semibold tracking-[-0.03em] text-[color:var(--text-primary)]">
+              Reusable methods attached to this entry
+            </h2>
+          </div>
+
+          {entry.linkedProtocols.length ? (
+            <div className="divide-y divide-[color:var(--line)] border-y border-[color:var(--line)]">
+              {entry.linkedProtocols.map((protocol) => (
+                <Link
+                  key={protocol.id}
+                  href={`/protocols/${protocol.id}`}
+                  className="block py-4 text-sm transition hover:text-[color:var(--text-primary)]"
+                >
+                  <span className="block font-medium text-[color:var(--text-primary)]">{protocol.title}</span>
+                  <span className="mt-1 block font-mono text-[11px] uppercase tracking-[0.16em] text-[color:var(--text-soft)]">
+                    {protocol.status}
+                  </span>
+                </Link>
+              ))}
+            </div>
+          ) : (
+            <div className="space-y-3 text-sm leading-7 text-[color:var(--text-muted)]">
+              <p>No protocol blocks are linked yet.</p>
+              <p>
+                Insert a protocol block from the document toolbar to connect this page to a reusable method.
               </p>
               <Link
                 href="/protocols"
-                className="font-mono text-[11px] uppercase tracking-[0.16em] text-[color:var(--accent-strong)] transition hover:text-[color:var(--text-primary)]"
+                className="inline-flex items-center border border-[color:var(--line)] px-3 py-2 text-[11px] uppercase tracking-[0.18em] text-[color:var(--accent-strong)] transition hover:border-[color:var(--accent-soft)] hover:text-[color:var(--text-primary)]"
               >
-                Open library
+                Open protocol library
               </Link>
             </div>
-            {entry.linkedProtocols.length ? (
-              <div className="mt-4 divide-y divide-[color:var(--line)] border-y border-[color:var(--line)]">
-                {entry.linkedProtocols.map((protocol) => (
-                  <Link
-                    key={protocol.id}
-                    href={`/protocols/${protocol.id}`}
-                    className="block py-3 text-sm transition hover:text-[color:var(--text-primary)]"
-                  >
-                    <span className="block font-medium text-[color:var(--text-primary)]">
-                      {protocol.title}
-                    </span>
-                    <span className="mt-1 block font-mono text-[11px] uppercase tracking-[0.16em] text-[color:var(--text-soft)]">
-                      {protocol.status}
-                    </span>
-                  </Link>
-                ))}
-              </div>
-            ) : (
-              <p className="mt-4 text-sm leading-7 text-[color:var(--text-muted)]">
-                No protocol blocks are linked yet. Insert one from the editor to
-                turn this notebook page into a reusable experimental record.
-              </p>
-            )}
-          </section>
-        </aside>
-      </div>
+          )}
+        </div>
+      </section>
     </section>
   );
 }
