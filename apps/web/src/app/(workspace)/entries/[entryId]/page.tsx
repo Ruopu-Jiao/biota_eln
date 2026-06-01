@@ -1,5 +1,6 @@
 import Link from "next/link";
 import {
+  formatEntryIdentifier,
   getEntryDetailForUser,
   listProtocolsForUser,
   type EntryBlock,
@@ -7,6 +8,7 @@ import {
 import { notFound } from "next/navigation";
 import { EntryEditor, type EntryEditorBlock } from "@/components/notebook/editor";
 import type { ProtocolOption } from "@/components/notebook/editor";
+import { listStoredSequenceEntityOptions } from "@/lib/entities/store";
 import { isDemoAuthMode } from "@/lib/auth/demo.server";
 import { requireServerSession } from "@/lib/auth/session";
 import {
@@ -43,8 +45,17 @@ function toEditorBlocks(blocks: EntryBlock[]): EntryEditorBlock[] {
       return {
         id: block.id,
         type: "table",
+        name: block.name,
         columns: block.columns,
         rows: block.rows,
+      };
+    }
+
+    if (block.type === "entity") {
+      return {
+        id: block.id,
+        type: "entity",
+        entityId: block.entityId,
       };
     }
 
@@ -85,10 +96,17 @@ export default async function EntryDetailPage({
   }
 
   const protocolOptions = toProtocolOptions(protocols);
+  const entityOptions = await listStoredSequenceEntityOptions();
+  const linkedEntities = entry.linkedEntityIds
+    .map((entityId) =>
+      entityOptions.find((entity) => entity.id === entityId),
+    )
+    .filter((entity): entity is (typeof entityOptions)[number] => Boolean(entity));
   const detailsTabName = `entry-${entry.id}-panel`;
   const documentTabId = `${detailsTabName}-document`;
   const metadataTabId = `${detailsTabName}-metadata`;
   const protocolsTabId = `${detailsTabName}-protocols`;
+  const entryIdentifier = formatEntryIdentifier(entry.id);
 
   return (
     <section className="space-y-4">
@@ -105,6 +123,9 @@ export default async function EntryDetailPage({
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <span className="border border-[color:var(--line)] px-2 py-1">{entry.status}</span>
+          <span className="border border-[color:var(--line)] px-2 py-1">
+            {entryIdentifier}
+          </span>
           <span className="border border-[color:var(--accent-soft)] bg-[color:var(--accent-muted)] px-2 py-1 text-[color:var(--text-primary)]">
             v{entry.latestVersionNumber}
           </span>
@@ -153,12 +174,13 @@ export default async function EntryDetailPage({
       </div>
 
       <section className="hidden peer-checked/document:block">
-        <article className="min-h-[calc(100vh-13rem)] border-x border-[color:var(--line)] px-6 py-6 lg:px-10 lg:py-8">
+        <article className="min-h-[calc(100vh-13rem)] border-x border-[color:var(--line)] bg-[color:var(--document-surface)] px-6 py-6 lg:px-10 lg:py-8">
           <EntryEditor
             entryId={entry.id}
             initialTitle={entry.title}
             initialBlocks={toEditorBlocks(entry.blocks)}
             protocolOptions={protocolOptions}
+            entityOptions={entityOptions}
             formAction={updateEntryDraftAction}
             submitLabel="Save entry version"
             pendingLabel="Saving version..."
@@ -179,6 +201,14 @@ export default async function EntryDetailPage({
           </div>
 
           <dl className="grid gap-5 text-sm text-[color:var(--text-muted)] sm:grid-cols-2">
+            <div>
+              <dt className="font-mono text-[11px] uppercase tracking-[0.16em] text-[color:var(--text-soft)]">
+                Entry ID
+              </dt>
+              <dd className="mt-2 font-mono text-xs text-[color:var(--accent-strong)]">
+                {entryIdentifier}
+              </dd>
+            </div>
             <div>
               <dt className="font-mono text-[11px] uppercase tracking-[0.16em] text-[color:var(--text-soft)]">
                 Repository
@@ -204,6 +234,30 @@ export default async function EntryDetailPage({
               <dd className="mt-2 text-[color:var(--text-primary)]">{entryDetailDateFormatter.format(entry.updatedAt)}</dd>
             </div>
           </dl>
+
+          {linkedEntities.length ? (
+            <div className="border-t border-[color:var(--line)] pt-5">
+              <p className="font-mono text-[11px] uppercase tracking-[0.16em] text-[color:var(--text-soft)]">
+                Linked entities
+              </p>
+              <div className="mt-3 divide-y divide-[color:var(--line)] border-y border-[color:var(--line)]">
+                {linkedEntities.map((entity) => (
+                  <Link
+                    key={entity.id}
+                    href={`/entities/${entity.id}`}
+                    className="flex flex-wrap items-center justify-between gap-3 px-0 py-3 text-sm transition hover:text-[color:var(--text-primary)]"
+                  >
+                    <span className="font-medium text-[color:var(--text-primary)]">
+                      {entity.title}
+                    </span>
+                    <span className="font-mono text-[11px] uppercase tracking-[0.14em] text-[color:var(--text-soft)]">
+                      {entity.typeLabel} / {entity.sequenceLength.toLocaleString()} bp
+                    </span>
+                  </Link>
+                ))}
+              </div>
+            </div>
+          ) : null}
         </div>
       </section>
 

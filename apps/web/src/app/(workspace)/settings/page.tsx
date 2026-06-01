@@ -3,6 +3,7 @@ import {
   getDemoWorkspaceSnapshot,
   isDemoAuthMode,
 } from "@/lib/auth/demo.server";
+import { ThemeSwitcher } from "@/components/theme/theme-switcher";
 import { requireServerSession } from "@/lib/auth/session";
 
 export default async function SettingsPage() {
@@ -21,17 +22,35 @@ export default async function SettingsPage() {
           Settings
         </p>
         <h1 className="mt-3 text-3xl font-semibold tracking-[-0.04em] text-[color:var(--text-primary)]">
-          Workspace configuration
+          General settings
         </h1>
         <p className="mt-3 max-w-3xl text-sm leading-7 text-[color:var(--text-muted)]">
-          Account, tenancy, and repository scaffolding are in place. This page
-          follows the flatter workspace language so structure comes from
-          hierarchy and dividers rather than stacked cards.
+          Manage appearance, account context, and workspace scaffolding from a
+          single page so the rest of the shell can stay focused on project
+          records and writing.
         </p>
       </div>
 
       <div className="grid gap-8 xl:grid-cols-[minmax(0,1.1fr)_minmax(0,0.9fr)]">
         <div className="space-y-8">
+          <section className="border-t border-[color:var(--line)] pt-4">
+            <p className="text-sm font-medium text-[color:var(--text-primary)]">
+              Appearance
+            </p>
+            <div className="mt-4 grid gap-5 border-y border-[color:var(--line)] py-4 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-center">
+              <div className="space-y-2">
+                <p className="font-mono text-[11px] uppercase tracking-[0.18em] text-[color:var(--text-soft)]">
+                  Theme
+                </p>
+                <p className="max-w-2xl text-sm leading-7 text-[color:var(--text-muted)]">
+                  Choose the workspace palette here instead of from the global
+                  header so navigation controls stay lightweight.
+                </p>
+              </div>
+              <ThemeSwitcher />
+            </div>
+          </section>
+
           <section className="border-t border-[color:var(--line)] pt-4">
             <p className="text-sm font-medium text-[color:var(--text-primary)]">
               Account

@@ -102,6 +102,18 @@ function parseEntryBlocksJson(formData: FormData): EntryBlock[] {
           }
 
           if (
+            block.type === "entity" &&
+            "entityId" in block &&
+            typeof block.entityId === "string"
+          ) {
+            return {
+              id: block.id,
+              type: "entity" as const,
+              entityId: block.entityId,
+            };
+          }
+
+          if (
             block.type === "table" &&
             "columns" in block &&
             "rows" in block &&
@@ -111,6 +123,10 @@ function parseEntryBlocksJson(formData: FormData): EntryBlock[] {
             return {
               id: block.id,
               type: "table" as const,
+              name:
+                "name" in block && typeof block.name === "string"
+                  ? block.name
+                  : undefined,
               columns: block.columns.map((column: unknown) =>
                 typeof column === "string" ? column : "",
               ),

@@ -57,7 +57,7 @@ export function ThemeSwitcher() {
   const theme = useSyncExternalStore(subscribe, getSnapshot, () => "obsidian");
 
   return (
-    <div className="flex items-center gap-1.5 border border-[color:var(--line)] bg-[color:var(--surface-muted)] px-1.5 py-1">
+    <div className="flex flex-wrap items-center gap-2 border border-[color:var(--line)] bg-[color:var(--surface-muted)] p-2">
       {themes.map((option) => {
         const active = option.value === theme;
 
@@ -68,10 +68,10 @@ export function ThemeSwitcher() {
             onClick={() => {
               applyTheme(option.value);
             }}
-            className={`px-2.5 py-1.5 text-[11px] uppercase tracking-[0.18em] transition ${
+            className={`inline-flex h-9 min-w-[5rem] items-center justify-center border px-3 text-[11px] uppercase tracking-[0.18em] transition ${
               active
-                ? "bg-[color:var(--accent-muted)] text-[color:var(--text-primary)]"
-                : "text-[color:var(--text-muted)] hover:text-[color:var(--text-primary)]"
+                ? "border-[color:var(--accent-soft)] bg-[color:var(--accent-muted)] text-[color:var(--text-primary)]"
+                : "border-[color:var(--line)] text-[color:var(--text-muted)] hover:border-[color:var(--line-strong)] hover:text-[color:var(--text-primary)]"
             }`}
           >
             {option.label}

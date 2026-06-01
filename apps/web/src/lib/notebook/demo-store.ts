@@ -35,6 +35,7 @@ type DemoStoreEntry = {
   bodyText: string | null;
   blocks: EntryBlock[];
   linkedProtocolIds: string[];
+  linkedEntityIds: string[];
 };
 
 type DemoStoreProtocol = {
@@ -139,6 +140,16 @@ function deriveLinkedProtocolIds(blocks: EntryBlock[]) {
   );
 }
 
+function deriveLinkedEntityIds(blocks: EntryBlock[]) {
+  return Array.from(
+    new Set(
+      blocks.flatMap((block) =>
+        block.type === "entity" ? [block.entityId] : [],
+      ),
+    ),
+  );
+}
+
 function deriveBodyText(
   blocks: EntryBlock[],
   protocolsById: Map<string, DemoStoreProtocol>,
@@ -153,7 +164,13 @@ function deriveBodyText(
         const header = block.columns.join("\t");
         const rows = block.rows.map((row) => row.join("\t")).join("\n");
 
-        return [`Table`, header, rows].filter(Boolean).join("\n");
+        return [block.name ? `Table: ${block.name}` : "Table", header, rows]
+          .filter(Boolean)
+          .join("\n");
+      }
+
+      if (block.type === "entity") {
+        return block.label ? `Entity: ${block.label}` : `Entity: ${block.entityId}`;
       }
 
       const protocol = protocolsById.get(block.protocolId);
@@ -198,12 +215,15 @@ function deriveSummary(
     }
 
     if (block.type === "table") {
-      const columns = block.columns.filter((column) => column.trim());
-      const summary = columns.length
-        ? `Table: ${columns.join(", ")}`
+      const summary = block.name?.trim()
+        ? `Table: ${block.name.trim()}`
         : `Table: ${block.columns.length} columns`;
 
       return truncateSummary(`${summary} (${block.rows.length} rows)`);
+    }
+
+    if (block.type === "entity") {
+      return truncateSummary(`Entity: ${block.label ?? block.entityId}`);
     }
 
     const protocol = protocolsById.get(block.protocolId);
@@ -240,12 +260,21 @@ function getSeedStore(): DemoNotebookStore {
       index === 0
         ? ["demo-protocol-sgrna-oligo"]
         : ["demo-protocol-colony-pcr"],
+    linkedEntityIds: [],
   }));
 
   return {
     entries,
     protocols,
   };
+}
+
+function getEntryLinkedEntityIds(entry: DemoStoreEntry) {
+  if (Array.isArray(entry.linkedEntityIds)) {
+    return entry.linkedEntityIds;
+  }
+
+  return deriveLinkedEntityIds(buildEntryBlocksForEntry(entry));
 }
 
 async function ensureDemoStore() {
@@ -300,19 +329,21 @@ export async function getDemoNotebookNavigator(): Promise<NotebookNavigatorData>
         name: "Root",
         slug: "root",
         parentFolderId: null,
-        entries: store.entries
+        records: store.entries
           .slice()
           .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))
           .map((entry) => ({
+            kind: "entry" as const,
             id: entry.id,
             title: entry.title,
             slug: entry.slug,
+            href: `/entries/${entry.id}`,
             latestVersionNumber: entry.latestVersionNumber,
           })),
         childFolders: [],
       },
     ],
-    unfiledEntries: [],
+    unfiledRecords: [],
   };
 }
 
@@ -365,6 +396,7 @@ export async function listDemoEntries(): Promise<EntryListItem[]> {
           slug: protocol.slug,
           status: protocol.status,
         })),
+      linkedEntityIds: getEntryLinkedEntityIds(entry),
     }));
 }
 
@@ -439,6 +471,7 @@ export async function createDemoEntryDraft(
     bodyText: deriveBodyText(blocks, protocolsById),
     blocks,
     linkedProtocolIds: deriveLinkedProtocolIds(blocks),
+    linkedEntityIds: deriveLinkedEntityIds(blocks),
     summary: input.summary?.trim() || deriveSummary(blocks, protocolsById),
   } satisfies DemoStoreEntry;
 
@@ -475,6 +508,7 @@ export async function getDemoEntryDetail(
     createdByName: entry.createdByName,
     bodyText: entry.bodyText,
     blocks: buildEntryBlocksForEntry(entry),
+    linkedEntityIds: getEntryLinkedEntityIds(entry),
     linkedProtocols: entry.linkedProtocolIds
       .map((protocolId) => protocolsById.get(protocolId))
       .filter((protocol): protocol is DemoStoreProtocol => Boolean(protocol))
@@ -538,6 +572,7 @@ export async function updateDemoEntryDraft(
   entry.blocks = blocks;
   entry.bodyText = deriveBodyText(blocks, protocolsById);
   entry.linkedProtocolIds = deriveLinkedProtocolIds(blocks);
+  entry.linkedEntityIds = deriveLinkedEntityIds(blocks);
   entry.latestVersionNumber += 1;
   entry.updatedAt = new Date().toISOString();
 

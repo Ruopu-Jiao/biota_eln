@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname, useRouter } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { signOut } from "next-auth/react";
 import {
   useEffect,
@@ -11,19 +11,27 @@ import {
   type ReactNode,
   type SVGProps,
 } from "react";
-import type { NotebookNavigatorData, NotebookNavigatorFolder } from "@biota/db";
-import { ThemeSwitcher } from "@/components/theme/theme-switcher";
+import type {
+  NotebookNavigatorData,
+  NotebookNavigatorFolder,
+  NotebookNavigatorRecord,
+} from "@biota/db";
 
 type IconProps = SVGProps<SVGSVGElement>;
 
-type NavigatorEntry = {
+type WorkspaceTabSnapshot = {
+  kind: "entry" | "entity";
   id: string;
-  title: string;
-  latestVersionNumber: number;
+};
+
+type CreateRecordTarget = {
+  scope: "root" | "folder";
+  folderId?: string;
+  folderName?: string;
 };
 
 const navigatorCollapsedStorageKey = "biota-navigator-collapsed";
-const entryTabsStorageKey = "biota-entry-tabs";
+const workspaceTabsStorageKey = "biota-entry-tabs";
 const workspaceStorageEventName = "biota-workspace-storage";
 
 function subscribeToWorkspaceStorage(callback: () => void) {
@@ -57,7 +65,7 @@ function readNavigatorCollapsedSnapshot() {
     return false;
   }
 
-  return /^\/entries\/[^/]+$/.test(window.location.pathname);
+  return /^\/(entries|entities)\/[^/]+$/.test(window.location.pathname);
 }
 
 function writeNavigatorCollapsedSnapshot(collapsed: boolean) {
@@ -68,32 +76,57 @@ function writeNavigatorCollapsedSnapshot(collapsed: boolean) {
   notifyWorkspaceStorageChange();
 }
 
-function readEntryTabsSnapshot() {
+function readWorkspaceTabsSnapshot() {
   if (typeof window === "undefined") {
     return "[]";
   }
 
-  return window.localStorage.getItem(entryTabsStorageKey) ?? "[]";
+  return window.localStorage.getItem(workspaceTabsStorageKey) ?? "[]";
 }
 
-function parseEntryTabsSnapshot(snapshot: string) {
+function parseWorkspaceTabsSnapshot(snapshot: string) {
   try {
     const parsed = JSON.parse(snapshot) as unknown;
 
     if (!Array.isArray(parsed)) {
-      return [] as string[];
+      return [] as WorkspaceTabSnapshot[];
     }
 
-    return parsed.filter(
-      (entryId): entryId is string => typeof entryId === "string",
-    );
+    return parsed.flatMap((tab) => {
+      if (typeof tab === "string") {
+        return [
+          {
+            kind: "entry" as const,
+            id: tab,
+          },
+        ];
+      }
+
+      if (
+        typeof tab === "object" &&
+        tab !== null &&
+        "kind" in tab &&
+        "id" in tab &&
+        (tab.kind === "entry" || tab.kind === "entity") &&
+        typeof tab.id === "string"
+      ) {
+        return [
+          {
+            kind: tab.kind,
+            id: tab.id,
+          },
+        ];
+      }
+
+      return [];
+    });
   } catch {
-    return [] as string[];
+    return [] as WorkspaceTabSnapshot[];
   }
 }
 
-function writeEntryTabsSnapshot(entryIds: string[]) {
-  window.localStorage.setItem(entryTabsStorageKey, JSON.stringify(entryIds));
+function writeWorkspaceTabsSnapshot(tabs: WorkspaceTabSnapshot[]) {
+  window.localStorage.setItem(workspaceTabsStorageKey, JSON.stringify(tabs));
   notifyWorkspaceStorageChange();
 }
 
@@ -108,26 +141,13 @@ function NotebookIcon(props: IconProps) {
   );
 }
 
-function HelixIcon(props: IconProps) {
+function StatsIcon(props: IconProps) {
   return (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" {...props}>
-      <path d="M7 4.5c4.5 0 5.5 4 10 4" />
-      <path d="M7 19.5c4.5 0 5.5-4 10-4" />
-      <path d="M7 4.5c0 4.5 4 5.5 4 10" />
-      <path d="M17 19.5c0-4.5-4-5.5-4-10" />
-      <path d="M6.5 8.5h11" />
-      <path d="M6.5 15.5h11" />
-    </svg>
-  );
-}
-
-function ProtocolIcon(props: IconProps) {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" {...props}>
-      <path d="M7 4.75h10" />
-      <path d="M7 9h10" />
-      <path d="M7 13.25h6.5" />
-      <path d="M5.5 3.5h13v17h-13z" />
+      <path d="M6 18.25V11.5" />
+      <path d="M12 18.25V6.75" />
+      <path d="M18 18.25v-4.5" />
+      <path d="M4.75 18.25h14.5" />
     </svg>
   );
 }
@@ -150,6 +170,15 @@ function SettingsIcon(props: IconProps) {
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" {...props}>
       <path d="M12 8.5a3.5 3.5 0 1 1 0 7 3.5 3.5 0 0 1 0-7Z" />
       <path d="M4.75 12a7.4 7.4 0 0 0 .22 1.76l-1.82 1.4 1.8 3.1 2.21-.76a7.7 7.7 0 0 0 1.52.88l.32 2.32h3.6l.32-2.32a7.7 7.7 0 0 0 1.52-.88l2.21.76 1.8-3.1-1.82-1.4A7.4 7.4 0 0 0 19.25 12a7.4 7.4 0 0 0-.22-1.76l1.82-1.4-1.8-3.1-2.21.76a7.7 7.7 0 0 0-1.52-.88L14.92 3.3h-3.6L11 5.62a7.7 7.7 0 0 0-1.52.88l-2.21-.76-1.8 3.1 1.82 1.4c-.15.57-.22 1.16-.22 1.76Z" />
+    </svg>
+  );
+}
+
+function PlusIcon(props: IconProps) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" {...props}>
+      <path d="M12 5.25v13.5" />
+      <path d="M5.25 12h13.5" />
     </svg>
   );
 }
@@ -194,6 +223,19 @@ function EntryIcon(props: IconProps) {
   );
 }
 
+function EntityIcon(props: IconProps) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" {...props}>
+      <path d="M8 5.5c3.8 0 5 3.2 8 3.2" />
+      <path d="M8 18.5c3.8 0 5-3.2 8-3.2" />
+      <path d="M8 5.5c0 3.8 3.2 5 3.2 8" />
+      <path d="M16 18.5c0-3.8-3.2-5-3.2-8" />
+      <path d="M6.5 9h11" />
+      <path d="M6.5 15h11" />
+    </svg>
+  );
+}
+
 function TabIcon(props: IconProps) {
   return (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" {...props}>
@@ -205,14 +247,27 @@ function TabIcon(props: IconProps) {
 }
 
 const primaryNav = [
-  { label: "Entries", href: "/entries", Icon: NotebookIcon },
-  { label: "Entities", href: "/entities", Icon: HelixIcon },
-  { label: "Protocols", href: "/protocols", Icon: ProtocolIcon },
+  { label: "Projects", href: "/entries", Icon: NotebookIcon },
+  { label: "Stats", href: "/stats", Icon: StatsIcon },
   { label: "Graph", href: "/graph", Icon: GraphIcon },
-  { label: "Settings", href: "/settings", Icon: SettingsIcon },
 ];
 
+function isProjectPath(pathname: string) {
+  return (
+    pathname === "/entries" ||
+    pathname.startsWith("/entries/") ||
+    pathname === "/entities" ||
+    pathname.startsWith("/entities/") ||
+    pathname === "/protocols" ||
+    pathname.startsWith("/protocols/")
+  );
+}
+
 function isActive(pathname: string, href: string) {
+  if (href === "/entries") {
+    return isProjectPath(pathname);
+  }
+
   return pathname === href || pathname.startsWith(`${href}/`);
 }
 
@@ -222,11 +277,23 @@ function titleFromPath(pathname: string) {
   }
 
   if (pathname === "/entries") {
-    return "Notebook";
+    return "Entries";
+  }
+
+  if (pathname === "/entities") {
+    return "Entities";
+  }
+
+  if (pathname === "/stats") {
+    return "Stats";
   }
 
   if (pathname.startsWith("/entries/")) {
     return "Entry workspace";
+  }
+
+  if (pathname.startsWith("/entities/")) {
+    return "Sequence workspace";
   }
 
   if (pathname.startsWith("/protocols/")) {
@@ -236,10 +303,30 @@ function titleFromPath(pathname: string) {
   return pathname.slice(1).replaceAll("/", " / ");
 }
 
-function getEntryIdFromPath(pathname: string) {
-  const match = pathname.match(/^\/entries\/([^/]+)/);
+function getWorkspaceTabFromPath(pathname: string): WorkspaceTabSnapshot | null {
+  const entryMatch = pathname.match(/^\/entries\/([^/]+)/);
 
-  return match?.[1] ?? null;
+  if (entryMatch) {
+    return {
+      kind: "entry",
+      id: entryMatch[1],
+    };
+  }
+
+  const entityMatch = pathname.match(/^\/entities\/([^/]+)/);
+
+  if (entityMatch) {
+    return {
+      kind: "entity",
+      id: entityMatch[1],
+    };
+  }
+
+  return null;
+}
+
+function workspaceTabKey(tab: WorkspaceTabSnapshot) {
+  return `${tab.kind}:${tab.id}`;
 }
 
 function collectFolderState(
@@ -258,30 +345,30 @@ function collectFolderState(
   }, {});
 }
 
-function collectNavigatorEntryMap(
+function collectNavigatorRecordMap(
   navigator: NotebookNavigatorData | null,
-): Map<string, NavigatorEntry> {
-  const entryMap = new Map<string, NavigatorEntry>();
+): Map<string, NotebookNavigatorRecord> {
+  const recordMap = new Map<string, NotebookNavigatorRecord>();
 
-  function addEntries(entries: NavigatorEntry[]) {
-    for (const entry of entries) {
-      entryMap.set(entry.id, entry);
+  function addRecords(records: NotebookNavigatorRecord[]) {
+    for (const record of records) {
+      recordMap.set(`${record.kind}:${record.id}`, record);
     }
   }
 
   function walkFolders(folders: NotebookNavigatorFolder[]) {
     for (const folder of folders) {
-      addEntries(folder.entries as NavigatorEntry[]);
+      addRecords(folder.records);
       walkFolders(folder.childFolders);
     }
   }
 
   if (navigator) {
     walkFolders(navigator.folders);
-    addEntries(navigator.unfiledEntries as NavigatorEntry[]);
+    addRecords(navigator.unfiledRecords);
   }
 
-  return entryMap;
+  return recordMap;
 }
 
 function NavigatorFolderTree({
@@ -290,43 +377,79 @@ function NavigatorFolderTree({
   depth,
   openByFolderId,
   onToggle,
+  createTarget,
+  onCreate,
 }: {
   folder: NotebookNavigatorFolder;
   pathname: string;
   depth: number;
   openByFolderId: Record<string, boolean>;
   onToggle: (folderId: string) => void;
+  createTarget: CreateRecordTarget | null;
+  onCreate: (target: CreateRecordTarget) => void;
 }) {
   const isOpen = openByFolderId[folder.id] ?? true;
-  const hasChildren = folder.childFolders.length > 0 || folder.entries.length > 0;
+  const hasChildren = folder.childFolders.length > 0 || folder.records.length > 0;
+  const isCreateMenuOpen =
+    createTarget?.scope === "folder" && createTarget.folderId === folder.id;
 
   return (
     <div>
-      <button
-        type="button"
-        onClick={() => onToggle(folder.id)}
-        className="flex w-full items-center gap-2 px-2 py-1.5 text-left text-sm text-[color:var(--text-muted)] transition hover:text-[color:var(--text-primary)]"
+      <div
+        className="flex items-center gap-1 px-2 py-1.5 text-left text-sm text-[color:var(--text-muted)]"
         style={{ paddingLeft: `${depth * 14 + 8}px` }}
       >
-        <ChevronIcon
-          open={isOpen}
-          className={`h-3.5 w-3.5 text-[color:var(--text-soft)] transition ${
-            hasChildren ? "opacity-100" : "opacity-0"
-          }`}
-        />
-        <FolderIcon className="h-4 w-4" />
-        <span className="truncate">{folder.name}</span>
-      </button>
+        <button
+          type="button"
+          onClick={() => onToggle(folder.id)}
+          className="flex min-w-0 flex-1 items-center gap-2 text-left transition hover:text-[color:var(--text-primary)]"
+        >
+          <ChevronIcon
+            open={isOpen}
+            className={`h-3.5 w-3.5 text-[color:var(--text-soft)] transition ${
+              hasChildren ? "opacity-100" : "opacity-0"
+            }`}
+          />
+          <FolderIcon className="h-4 w-4" />
+          <span className="truncate">{folder.name}</span>
+        </button>
+        <div data-create-menu-root className="relative">
+          <button
+            type="button"
+            onClick={(event) => {
+              event.stopPropagation();
+              onCreate({
+                scope: "folder",
+                folderId: folder.id,
+                folderName: folder.name,
+              });
+            }}
+            aria-label={`Create a record in ${folder.name}`}
+            title={`Create in ${folder.name}`}
+            className="inline-flex h-7 w-7 items-center justify-center border border-[color:var(--line)] text-[color:var(--text-muted)] transition hover:border-[color:var(--line-strong)] hover:text-[color:var(--text-primary)]"
+          >
+            <PlusIcon className="h-3.5 w-3.5" />
+          </button>
+          {isCreateMenuOpen ? (
+            <RecordCreateMenu target={createTarget} />
+          ) : null}
+        </div>
+      </div>
 
       {isOpen ? (
         <div className="space-y-0.5">
-          {folder.entries.map((entry) => {
-            const active = pathname === `/entries/${entry.id}`;
+          {folder.records.map((record) => {
+            const active = pathname === record.href;
+            const Icon = record.kind === "entity" ? EntityIcon : EntryIcon;
+            const badge =
+              record.kind === "entry"
+                ? `v${record.latestVersionNumber}`
+                : record.entityTypeLabel;
 
             return (
               <Link
-                key={entry.id}
-                href={`/entries/${entry.id}`}
+                key={`${record.kind}-${record.id}`}
+                href={record.href}
                 className={`flex items-center gap-2 px-2 py-1.5 text-sm transition ${
                   active
                     ? "bg-[color:var(--accent-muted)] text-[color:var(--text-primary)]"
@@ -334,27 +457,29 @@ function NavigatorFolderTree({
                 }`}
                 style={{ paddingLeft: `${depth * 14 + 32}px` }}
               >
-                <EntryIcon className="h-4 w-4 shrink-0" />
-                <span className="min-w-0 truncate">{entry.title}</span>
+                <Icon className="h-4 w-4 shrink-0" />
+                <span className="min-w-0 truncate">{record.title}</span>
                 <span className="ml-auto text-[10px] uppercase tracking-[0.14em] text-[color:var(--text-soft)]">
-                  v{entry.latestVersionNumber}
+                  {badge}
                 </span>
               </Link>
             );
           })}
 
           {folder.childFolders.map((childFolder) => (
-            <NavigatorFolderTree
-              key={childFolder.id}
-              folder={childFolder}
-              pathname={pathname}
-              depth={depth + 1}
-              openByFolderId={openByFolderId}
-              onToggle={onToggle}
-            />
-          ))}
-        </div>
-      ) : null}
+          <NavigatorFolderTree
+            key={childFolder.id}
+            folder={childFolder}
+            pathname={pathname}
+            depth={depth + 1}
+            openByFolderId={openByFolderId}
+            onToggle={onToggle}
+            createTarget={createTarget}
+            onCreate={onCreate}
+          />
+        ))}
+      </div>
+    ) : null}
     </div>
   );
 }
@@ -412,6 +537,61 @@ function WorkspaceTabButton({
   );
 }
 
+function buildCreateHref(
+  basePath: "/entries/new" | "/entities/new",
+  target: CreateRecordTarget | null,
+) {
+  if (!target || target.scope === "root" || !target.folderId) {
+    return basePath;
+  }
+
+  const params = new URLSearchParams({
+    folderId: target.folderId,
+  });
+
+  if (target.folderName) {
+    params.set("folderName", target.folderName);
+  }
+
+  return `${basePath}?${params.toString()}`;
+}
+
+function RecordCreateMenu({
+  target,
+}: {
+  target: CreateRecordTarget | null;
+}) {
+  if (!target) {
+    return null;
+  }
+
+  return (
+    <div
+      data-create-menu-root
+      className="absolute right-0 top-full z-20 mt-2 min-w-[210px] border border-[color:var(--line)] bg-[color:var(--surface-strong)] p-1 shadow-xl"
+    >
+      <Link
+        href={buildCreateHref("/entries/new", target)}
+        className="flex items-center justify-between gap-3 px-3 py-2 text-sm text-[color:var(--text-primary)] transition hover:bg-[color:var(--surface-muted)]"
+      >
+        <span>New entry</span>
+        <span className="font-mono text-[11px] uppercase tracking-[0.14em] text-[color:var(--text-soft)]">
+          Entry
+        </span>
+      </Link>
+      <Link
+        href={buildCreateHref("/entities/new", target)}
+        className="flex items-center justify-between gap-3 px-3 py-2 text-sm text-[color:var(--text-primary)] transition hover:bg-[color:var(--surface-muted)]"
+      >
+        <span>New entity</span>
+        <span className="font-mono text-[11px] uppercase tracking-[0.14em] text-[color:var(--text-soft)]">
+          DNA
+        </span>
+      </Link>
+    </div>
+  );
+}
+
 export function AppShell({
   children,
   viewerName = "Biota user",
@@ -421,82 +601,147 @@ export function AppShell({
 }: AppShellProps) {
   const pathname = usePathname();
   const router = useRouter();
+  const searchParams = useSearchParams();
   const demoMode = process.env.NEXT_PUBLIC_BIOTA_DEMO_MODE === "true";
-  const entryIdFromPath = getEntryIdFromPath(pathname);
-  const isEntryDetailRoute = Boolean(entryIdFromPath);
-  const showInspector = !isEntryDetailRoute;
-  const entryMap = useMemo(() => collectNavigatorEntryMap(navigator), [navigator]);
+  const activeWorkspaceTab = getWorkspaceTabFromPath(pathname);
+  const isEntryDetailRoute = activeWorkspaceTab?.kind === "entry";
+  const isEntityDetailRoute = activeWorkspaceTab?.kind === "entity";
+  const isSettingsOverlayRoute = pathname === "/settings";
+  const showInspector =
+    !isEntryDetailRoute && !isEntityDetailRoute && !isSettingsOverlayRoute;
+  const recordMap = useMemo(() => collectNavigatorRecordMap(navigator), [navigator]);
+  const settingsReturnPath = useMemo(() => {
+    const from = searchParams.get("from");
+
+    if (!from || from === "/settings") {
+      return "/entries";
+    }
+
+    return from;
+  }, [searchParams]);
+  const currentLocation = useMemo(() => {
+    const query = searchParams.toString();
+
+    if (!query) {
+      return pathname;
+    }
+
+    return `${pathname}?${query}`;
+  }, [pathname, searchParams]);
   const navigatorCollapsed = useSyncExternalStore(
     subscribeToWorkspaceStorage,
     readNavigatorCollapsedSnapshot,
-    () => isEntryDetailRoute,
+    () => Boolean(isEntryDetailRoute || isEntityDetailRoute),
   );
-  const storedEntryTabsSnapshot = useSyncExternalStore(
+  const storedWorkspaceTabsSnapshot = useSyncExternalStore(
     subscribeToWorkspaceStorage,
-    readEntryTabsSnapshot,
+    readWorkspaceTabsSnapshot,
     () => "[]",
   );
-  const storedEntryIds = useMemo(
-    () => parseEntryTabsSnapshot(storedEntryTabsSnapshot),
-    [storedEntryTabsSnapshot],
+  const storedWorkspaceTabs = useMemo(
+    () => parseWorkspaceTabsSnapshot(storedWorkspaceTabsSnapshot),
+    [storedWorkspaceTabsSnapshot],
   );
-  const openEntryIds = useMemo(() => {
-    const entryIds = entryIdFromPath
-      ? [...storedEntryIds, entryIdFromPath]
-      : [...storedEntryIds];
-
-    return entryIds.filter(
-      (entryId, index, currentEntryIds) =>
-        currentEntryIds.indexOf(entryId) === index,
-    );
-  }, [entryIdFromPath, storedEntryIds]);
-  const [openByFolderId, setOpenByFolderId] = useState<Record<string, boolean>>(
-    () => collectFolderState(navigator?.folders ?? []),
-  );
-
-  useEffect(() => {
-    if (!entryIdFromPath) {
-      return;
-    }
-
-    const storedIds = parseEntryTabsSnapshot(readEntryTabsSnapshot());
-
-    if (storedIds.includes(entryIdFromPath)) {
-      return;
-    }
-
-    writeEntryTabsSnapshot([...storedIds, entryIdFromPath]);
-  }, [entryIdFromPath]);
-
-  const workspaceTabs = useMemo(() => {
-    const tabs = [
-      {
-        id: "notebook",
-        title: "Notebook",
-        href: "/entries",
-        active: pathname === "/entries",
-        closable: false,
-        version: null as number | null,
-      },
-      ...openEntryIds.map((entryId) => {
-        const entry = entryMap.get(entryId);
-
-        return {
-          id: entryId,
-          title: entry?.title ?? "Entry",
-          href: `/entries/${entryId}`,
-          active: pathname === `/entries/${entryId}`,
-          closable: true,
-          version: entry?.latestVersionNumber ?? null,
-        };
-      }),
-    ];
+  const openWorkspaceTabs = useMemo(() => {
+    const tabs = activeWorkspaceTab
+      ? [...storedWorkspaceTabs, activeWorkspaceTab]
+      : [...storedWorkspaceTabs];
 
     return tabs.filter(
       (tab, index, currentTabs) =>
-        currentTabs.findIndex((candidate) => candidate.id === tab.id) === index,
+        currentTabs.findIndex((candidate) => workspaceTabKey(candidate) === workspaceTabKey(tab)) === index,
     );
-  }, [entryMap, openEntryIds, pathname]);
+  }, [activeWorkspaceTab, storedWorkspaceTabs]);
+  const [openByFolderId, setOpenByFolderId] = useState<Record<string, boolean>>(
+    () => collectFolderState(navigator?.folders ?? []),
+  );
+  const [createMenuTarget, setCreateMenuTarget] = useState<CreateRecordTarget | null>(null);
+
+  useEffect(() => {
+    if (!activeWorkspaceTab) {
+      return;
+    }
+
+    const storedTabs = parseWorkspaceTabsSnapshot(readWorkspaceTabsSnapshot());
+
+    if (
+      storedTabs.some(
+        (tab) => workspaceTabKey(tab) === workspaceTabKey(activeWorkspaceTab),
+      )
+    ) {
+      return;
+    }
+
+    writeWorkspaceTabsSnapshot([...storedTabs, activeWorkspaceTab]);
+  }, [activeWorkspaceTab]);
+
+  useEffect(() => {
+    const frame = window.requestAnimationFrame(() => {
+      setCreateMenuTarget(null);
+    });
+
+    return () => {
+      window.cancelAnimationFrame(frame);
+    };
+  }, [currentLocation]);
+
+  useEffect(() => {
+    if (!createMenuTarget) {
+      return;
+    }
+
+    function handlePointerDown(event: PointerEvent) {
+      if (event.target instanceof Element) {
+        if (!event.target.closest("[data-create-menu-root]")) {
+          setCreateMenuTarget(null);
+        }
+      }
+    }
+
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        setCreateMenuTarget(null);
+      }
+    }
+
+    window.addEventListener("pointerdown", handlePointerDown);
+    window.addEventListener("keydown", handleKeyDown);
+
+    return () => {
+      window.removeEventListener("pointerdown", handlePointerDown);
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [createMenuTarget]);
+
+  const workspaceTabs = useMemo(() => {
+    const tabs = openWorkspaceTabs.map((tab) => {
+      const record = recordMap.get(workspaceTabKey(tab));
+      const href =
+        record?.href ??
+        (tab.kind === "entry" ? `/entries/${tab.id}` : `/entities/${tab.id}`);
+
+      return {
+        key: workspaceTabKey(tab),
+        id: tab.id,
+        kind: tab.kind,
+        title:
+          record?.title ??
+          (tab.kind === "entry" ? "Entry" : "Sequence entity"),
+        href,
+        active: pathname === href,
+        closable: true,
+        version:
+          record?.kind === "entry" ? record.latestVersionNumber : null,
+        entityType:
+          record?.kind === "entity" ? record.entityTypeLabel : null,
+      };
+    });
+
+    return tabs.filter(
+      (tab, index, currentTabs) =>
+        currentTabs.findIndex((candidate) => candidate.key === tab.key) === index,
+    );
+  }, [openWorkspaceTabs, pathname, recordMap]);
 
   async function handleSignOut() {
     if (demoMode) {
@@ -510,22 +755,56 @@ export function AppShell({
     await signOut({ callbackUrl: "/sign-in" });
   }
 
-  function closeEntryTab(entryId: string) {
-    const remainingTabs = openEntryIds.filter(
-      (currentEntryId) => currentEntryId !== entryId,
+  function closeWorkspaceTab(tabToClose: WorkspaceTabSnapshot) {
+    const remainingTabs = openWorkspaceTabs.filter(
+      (currentTab) => workspaceTabKey(currentTab) !== workspaceTabKey(tabToClose),
     );
 
-    writeEntryTabsSnapshot(remainingTabs);
+    writeWorkspaceTabsSnapshot(remainingTabs);
 
-    if (entryIdFromPath === entryId) {
-      const nextEntryId = remainingTabs.at(-1);
+    if (
+      activeWorkspaceTab &&
+      workspaceTabKey(activeWorkspaceTab) === workspaceTabKey(tabToClose)
+    ) {
+      const nextTab = remainingTabs.at(-1);
 
-      router.push(nextEntryId ? `/entries/${nextEntryId}` : "/entries");
+      router.push(
+        nextTab
+          ? nextTab.kind === "entry"
+            ? `/entries/${nextTab.id}`
+            : `/entities/${nextTab.id}`
+          : "/stats",
+      );
     }
   }
 
+  function closeSettingsOverlay() {
+    router.push(settingsReturnPath);
+  }
+
+  function handlePrimaryNavClick(href: string, active: boolean) {
+    setCreateMenuTarget(null);
+
+    if (href === "/entries" && active) {
+      writeNavigatorCollapsedSnapshot(!navigatorCollapsed);
+      return;
+    }
+
+    if (href === "/entries" && !active) {
+      writeNavigatorCollapsedSnapshot(false);
+      router.push(href);
+      return;
+    }
+
+    if (active) {
+      return;
+    }
+
+    router.push(href);
+  }
+
   return (
-    <div className="min-h-screen bg-[color:var(--bg)] text-[color:var(--text-primary)]">
+    <div className="relative min-h-screen bg-[color:var(--bg)] text-[color:var(--text-primary)]">
       <header className="sticky top-0 z-20 border-b border-[color:var(--line)] bg-[color:var(--surface-strong)] backdrop-blur-xl">
         <div className="grid h-16 grid-cols-[auto_minmax(0,1fr)_auto] items-stretch px-4 lg:px-6">
           <div className="flex items-center gap-3 pr-4">
@@ -545,29 +824,20 @@ export function AppShell({
           <div className="hidden items-center border-x border-[color:var(--line)] px-4 md:flex">
             <div className="flex w-full items-center gap-3 text-sm text-[color:var(--text-muted)]">
               <span className="font-mono text-[color:var(--text-soft)]">⌘K</span>
-              <span>Search entries, entities, protocols, and linked relations</span>
+              <span>Search workspace records, sequences, methods, and linked relations</span>
             </div>
           </div>
 
           <div className="flex items-center gap-2 pl-4">
-            <ThemeSwitcher />
-            <button
-              type="button"
-              onClick={() => {
-                writeNavigatorCollapsedSnapshot(!navigatorCollapsed);
-              }}
-              className="inline-flex items-center gap-2 border border-[color:var(--line)] px-3 py-2 text-sm text-[color:var(--text-muted)] transition hover:border-[color:var(--line-strong)] hover:text-[color:var(--text-primary)]"
-            >
-              <ChevronIcon open={!navigatorCollapsed} className="h-4 w-4" />
-              <span>{navigatorCollapsed ? "Show navigator" : "Collapse navigator"}</span>
-            </button>
             <Link
-              href="/entries"
-              className="inline-flex items-center border border-[color:var(--line)] px-3 py-2 text-sm text-[color:var(--text-muted)] transition hover:border-[color:var(--line-strong)] hover:text-[color:var(--text-primary)]"
+              href={`/settings?from=${encodeURIComponent(currentLocation)}`}
+              aria-label="Settings"
+              title="Settings"
+              className="inline-flex h-9 w-9 items-center justify-center border border-[color:var(--line)] text-[color:var(--text-muted)] transition hover:border-[color:var(--line-strong)] hover:text-[color:var(--text-primary)]"
             >
-              New entry
+              <SettingsIcon className="h-4 w-4" />
             </Link>
-            <div className="hidden border border-[color:var(--line)] px-3 py-2 text-sm text-[color:var(--text-muted)] lg:block">
+            <div className="hidden min-h-9 items-center border border-[color:var(--line)] px-3 text-sm text-[color:var(--text-muted)] lg:flex">
               {workspaceLabel}
             </div>
             <button
@@ -575,7 +845,7 @@ export function AppShell({
               onClick={() => {
                 void handleSignOut();
               }}
-              className="inline-flex items-center border border-[color:var(--line)] px-3 py-2 text-sm text-[color:var(--text-muted)] transition hover:border-[color:var(--line-strong)] hover:text-[color:var(--text-primary)]"
+              className="inline-flex min-h-9 items-center border border-[color:var(--line)] px-3 text-sm text-[color:var(--text-muted)] transition hover:border-[color:var(--line-strong)] hover:text-[color:var(--text-primary)]"
             >
               Sign out
             </button>
@@ -584,7 +854,9 @@ export function AppShell({
       </header>
 
       <div
-        className="grid min-h-[calc(100vh-4rem)]"
+        className={`grid min-h-[calc(100vh-4rem)] ${
+          isSettingsOverlayRoute ? "pointer-events-none select-none opacity-35 blur-[2px]" : ""
+        }`}
         style={{
           gridTemplateColumns: navigatorCollapsed
             ? showInspector
@@ -595,28 +867,30 @@ export function AppShell({
               : "72px minmax(240px,320px) minmax(0,1fr)",
         }}
       >
-        <aside className="border-r border-[color:var(--line)] bg-[color:var(--surface-muted)] px-2 py-4">
+        <aside className="flex flex-col border-r border-[color:var(--line)] bg-[color:var(--surface-muted)] px-2 py-4">
           <div className="space-y-2">
             {primaryNav.map((item) => {
               const active = isActive(pathname, item.href);
               const Icon = item.Icon;
 
               return (
-                <Link
+                <button
                   key={item.href}
-                  href={item.href}
+                  type="button"
+                  onClick={() => handlePrimaryNavClick(item.href, active)}
                   className={`group relative flex h-11 items-center justify-center border transition ${
                     active
                       ? "border-[color:var(--accent-soft)] bg-[color:var(--accent-muted)] text-[color:var(--text-primary)]"
                       : "border-[color:var(--line)] text-[color:var(--text-muted)] hover:border-[color:var(--line-strong)] hover:text-[color:var(--text-primary)]"
                   }`}
                   aria-label={item.label}
+                  title={item.label}
                 >
                   <Icon className="h-5 w-5" />
                   <span className="pointer-events-none absolute left-full top-1/2 z-20 ml-3 -translate-y-1/2 whitespace-nowrap border border-[color:var(--line)] bg-[color:var(--surface-strong)] px-2 py-1 text-[11px] uppercase tracking-[0.16em] text-[color:var(--text-muted)] opacity-0 shadow-lg transition group-hover:opacity-100 group-focus-visible:opacity-100">
                     {item.label}
                   </span>
-                </Link>
+                </button>
               );
             })}
           </div>
@@ -633,9 +907,39 @@ export function AppShell({
                   {navigator?.repository.name ?? "Main notebook"}
                 </p>
               </div>
-              <span className="font-mono text-[10px] uppercase tracking-[0.16em] text-[color:var(--text-soft)]">
-                Files
-              </span>
+              <div className="flex items-center gap-2">
+                <div data-create-menu-root className="relative">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setCreateMenuTarget((current) =>
+                        current?.scope === "root" ? null : { scope: "root" },
+                      );
+                    }}
+                    aria-label="Create new record"
+                    title="Create new record"
+                    className="inline-flex h-8 w-8 items-center justify-center border border-[color:var(--line)] text-[color:var(--text-muted)] transition hover:border-[color:var(--line-strong)] hover:text-[color:var(--text-primary)]"
+                  >
+                    <PlusIcon className="h-4 w-4" />
+                  </button>
+
+                  {createMenuTarget?.scope === "root" ? (
+                    <RecordCreateMenu target={createMenuTarget} />
+                  ) : null}
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setCreateMenuTarget(null);
+                    writeNavigatorCollapsedSnapshot(true);
+                  }}
+                  aria-label="Collapse navigator"
+                  title="Collapse navigator"
+                  className="inline-flex h-8 min-w-8 items-center justify-center border border-[color:var(--line)] px-1 font-mono text-xs text-[color:var(--text-muted)] transition hover:border-[color:var(--line-strong)] hover:text-[color:var(--text-primary)]"
+                >
+                  <span>{"<<"}</span>
+                </button>
+              </div>
             </div>
 
             <div className="mt-4 space-y-1">
@@ -653,35 +957,52 @@ export function AppShell({
                         [folderId]: !(current[folderId] ?? true),
                       }));
                     }}
+                    createTarget={createMenuTarget}
+                    onCreate={(target) => {
+                      setCreateMenuTarget(
+                        createMenuTarget?.scope === "folder" &&
+                          createMenuTarget.folderId === target.folderId
+                          ? null
+                          : target,
+                      );
+                    }}
                   />
                 ))
-              ) : (
-                <p className="px-2 py-4 text-sm leading-7 text-[color:var(--text-soft)]">
-                  Folders and entries will appear here as the notebook grows.
-                </p>
-              )}
+                ) : (
+                  <p className="px-2 py-4 text-sm leading-7 text-[color:var(--text-soft)]">
+                    Folders and records will appear here as the workspace grows.
+                  </p>
+                )}
 
-              {navigator?.unfiledEntries.length ? (
+              {navigator?.unfiledRecords.length ? (
                 <div className="border-t border-[color:var(--line)] pt-3">
                   <p className="px-2 text-[11px] uppercase tracking-[0.18em] text-[color:var(--text-soft)]">
                     Unfiled
                   </p>
                   <div className="mt-2 space-y-0.5">
-                    {navigator.unfiledEntries.map((entry) => {
-                      const active = pathname === `/entries/${entry.id}`;
+                    {navigator.unfiledRecords.map((record) => {
+                      const active = pathname === record.href;
+                      const Icon = record.kind === "entity" ? EntityIcon : EntryIcon;
+                      const badge =
+                        record.kind === "entry"
+                          ? `v${record.latestVersionNumber}`
+                          : record.entityTypeLabel;
 
                       return (
                         <Link
-                          key={entry.id}
-                          href={`/entries/${entry.id}`}
+                          key={`${record.kind}-${record.id}`}
+                          href={record.href}
                           className={`flex items-center gap-2 px-2 py-1.5 text-sm transition ${
                             active
                               ? "bg-[color:var(--accent-muted)] text-[color:var(--text-primary)]"
                               : "text-[color:var(--text-muted)] hover:text-[color:var(--text-primary)]"
                           }`}
                         >
-                          <EntryIcon className="h-4 w-4" />
-                          <span className="truncate">{entry.title}</span>
+                          <Icon className="h-4 w-4 shrink-0" />
+                          <span className="truncate">{record.title}</span>
+                          <span className="ml-auto text-[10px] uppercase tracking-[0.14em] text-[color:var(--text-soft)]">
+                            {badge}
+                          </span>
                         </Link>
                       );
                     })}
@@ -693,31 +1014,43 @@ export function AppShell({
         ) : null}
 
         <main
-          className={`min-w-0 ${isEntryDetailRoute ? "px-4 py-6 lg:px-8" : "px-5 py-5 lg:px-7"}`}
+          className={`min-w-0 ${isEntryDetailRoute || isEntityDetailRoute ? "px-4 py-6 lg:px-8" : "px-5 py-5 lg:px-7"}`}
         >
           <div className="mb-5 space-y-3 border-b border-[color:var(--line)] pb-4">
-            {pathname.startsWith("/entries") ? (
+            {(pathname.startsWith("/entries") || pathname.startsWith("/entities")) && workspaceTabs.length ? (
               <div className="flex min-w-0 items-center gap-2 overflow-x-auto pb-1">
                 {workspaceTabs.map((tab) => (
                   <WorkspaceTabButton
-                    key={tab.id}
+                    key={tab.key}
                     active={tab.active}
                     onClick={() => router.push(tab.href)}
                     onClose={
                       tab.closable
                         ? () => {
-                            closeEntryTab(tab.id);
+                            closeWorkspaceTab({
+                              kind: tab.kind,
+                              id: tab.id,
+                            });
                           }
                         : undefined
                     }
                     closeLabel={`Close ${tab.title}`}
                     title={tab.title}
                   >
-                    <TabIcon className="h-4 w-4 shrink-0" />
+                    {tab.kind === "entity" ? (
+                      <EntityIcon className="h-4 w-4 shrink-0" />
+                    ) : (
+                      <TabIcon className="h-4 w-4 shrink-0" />
+                    )}
                     <span className="min-w-0 truncate">{tab.title}</span>
                     {tab.version ? (
                       <span className="font-mono text-[10px] uppercase tracking-[0.14em] text-[color:var(--text-soft)]">
                         v{tab.version}
+                      </span>
+                    ) : null}
+                    {tab.entityType ? (
+                      <span className="font-mono text-[10px] uppercase tracking-[0.14em] text-[color:var(--text-soft)]">
+                        {tab.entityType}
                       </span>
                     ) : null}
                   </WorkspaceTabButton>
@@ -731,7 +1064,7 @@ export function AppShell({
               </div>
             )}
           </div>
-          <div>{children}</div>
+          <div>{isSettingsOverlayRoute ? null : children}</div>
         </main>
 
         {showInspector ? (
@@ -777,6 +1110,33 @@ export function AppShell({
           </aside>
         ) : null}
       </div>
+
+      {isSettingsOverlayRoute ? (
+        <div className="fixed inset-0 z-40 overflow-y-auto bg-[color:var(--surface-strong)]/72 backdrop-blur-md">
+          <div className="flex min-h-screen flex-col bg-[color:var(--bg)]">
+            <div className="flex items-center justify-between gap-4 border-b border-[color:var(--line)] bg-[color:var(--surface-strong)] px-4 py-4 lg:px-6">
+              <div>
+                <p className="font-mono text-[11px] uppercase tracking-[0.22em] text-[color:var(--accent-strong)]">
+                  Settings
+                </p>
+                <p className="mt-1 text-sm text-[color:var(--text-muted)]">
+                  Application preferences and workspace configuration
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={closeSettingsOverlay}
+                className="inline-flex h-9 items-center border border-[color:var(--line)] px-3 text-sm text-[color:var(--text-muted)] transition hover:border-[color:var(--line-strong)] hover:text-[color:var(--text-primary)]"
+              >
+                Close
+              </button>
+            </div>
+            <div className="flex-1 overflow-y-auto px-5 py-6 lg:px-8 lg:py-8">
+              {children}
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }

@@ -78,6 +78,7 @@ export interface EntryListItem {
     slug: string;
     status: string;
   }>;
+  linkedEntityIds: string[];
 }
 
 export interface EntryTextBlock {
@@ -93,33 +94,62 @@ export interface EntryProtocolBlock {
   label?: string;
 }
 
+export interface EntryEntityBlock {
+  id: string;
+  type: "entity";
+  entityId: string;
+  label?: string;
+}
+
 export interface EntryTableBlock {
   id: string;
   type: "table";
+  name?: string;
   columns: string[];
   rows: string[][];
 }
 
-export type EntryBlock = EntryTextBlock | EntryProtocolBlock | EntryTableBlock;
+export type EntryBlock =
+  | EntryTextBlock
+  | EntryProtocolBlock
+  | EntryEntityBlock
+  | EntryTableBlock;
 
 export interface EntryDetail extends EntryListItem {
   bodyText: string | null;
   blocks: EntryBlock[];
 }
 
-export interface NotebookNavigatorEntry {
+interface NotebookNavigatorRecordBase {
   id: string;
   title: string;
   slug: string;
+  href: string;
+}
+
+export interface NotebookNavigatorEntryRecord
+  extends NotebookNavigatorRecordBase {
+  kind: "entry";
   latestVersionNumber: number;
 }
+
+export interface NotebookNavigatorEntityRecord
+  extends NotebookNavigatorRecordBase {
+  kind: "entity";
+  entityTypeLabel: string;
+  sequenceLength: number;
+}
+
+export type NotebookNavigatorRecord =
+  | NotebookNavigatorEntryRecord
+  | NotebookNavigatorEntityRecord;
 
 export interface NotebookNavigatorFolder {
   id: string;
   name: string;
   slug: string;
   parentFolderId: string | null;
-  entries: NotebookNavigatorEntry[];
+  records: NotebookNavigatorRecord[];
   childFolders: NotebookNavigatorFolder[];
 }
 
@@ -130,7 +160,7 @@ export interface NotebookNavigatorData {
     slug: string;
   };
   folders: NotebookNavigatorFolder[];
-  unfiledEntries: NotebookNavigatorEntry[];
+  unfiledRecords: NotebookNavigatorRecord[];
 }
 
 export interface ProtocolListItem {
@@ -156,6 +186,7 @@ export interface CreateEntryDraftInput {
   summary?: string;
   bodyText?: string;
   linkedProtocolIds?: string[];
+  folderId?: string | null;
 }
 
 export interface UpdateEntryDraftInput {
@@ -194,6 +225,36 @@ function compactSlug(value: string) {
 
 function preferredSlug(value: string, fallback: string) {
   return compactSlug(value || fallback);
+}
+
+function spreadsheetColumnLabel(index: number) {
+  let label = "";
+  let current = index;
+
+  do {
+    label = String.fromCharCode(65 + (current % 26)) + label;
+    current = Math.floor(current / 26) - 1;
+  } while (current >= 0);
+
+  return label;
+}
+
+function buildSpreadsheetColumns(count: number) {
+  return Array.from({ length: Math.max(1, count) }, (_, index) =>
+    spreadsheetColumnLabel(index),
+  );
+}
+
+export function formatEntryIdentifier(entryId: string) {
+  const uuidMatch = entryId.match(
+    /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i,
+  );
+
+  if (uuidMatch) {
+    return `ENT-${uuidMatch[0].toUpperCase()}`;
+  }
+
+  return `ENT-${entryId.replace(/[^a-z0-9]/gi, "").toUpperCase()}`;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -237,17 +298,31 @@ function normalizeEntryProtocolBlock(
   };
 }
 
+function normalizeEntryEntityBlock(block: unknown): EntryEntityBlock | null {
+  if (
+    !isRecord(block) ||
+    block.type !== "entity" ||
+    typeof block.id !== "string" ||
+    typeof block.entityId !== "string"
+  ) {
+    return null;
+  }
+
+  return {
+    id: block.id,
+    type: "entity",
+    entityId: block.entityId,
+    label: typeof block.label === "string" ? block.label : undefined,
+  };
+}
+
 function normalizeEntryTableBlock(block: unknown): EntryTableBlock | null {
   if (!isRecord(block) || block.type !== "table" || typeof block.id !== "string") {
     return null;
   }
 
   const rawColumns = Array.isArray(block.columns) ? block.columns : [];
-  const columns = rawColumns.map((column) =>
-    typeof column === "string" ? column : "",
-  );
-
-  const safeColumns = columns.length ? columns : ["Column 1", "Column 2"];
+  const safeColumns = buildSpreadsheetColumns(rawColumns.length || 2);
   const width = safeColumns.length;
   const rawRows = Array.isArray(block.rows) ? block.rows : [];
   const rows = rawRows.map((row) => {
@@ -263,6 +338,10 @@ function normalizeEntryTableBlock(block: unknown): EntryTableBlock | null {
   return {
     id: block.id,
     type: "table",
+    name:
+      typeof block.name === "string" && block.name.trim()
+        ? block.name.trim()
+        : undefined,
     columns: safeColumns,
     rows,
   };
@@ -284,6 +363,10 @@ function normalizeEntryBlocks(
 
       if (isRecord(block) && block.type === "protocol") {
         return normalizeEntryProtocolBlock(block, allowedProtocolIds);
+      }
+
+      if (isRecord(block) && block.type === "entity") {
+        return normalizeEntryEntityBlock(block);
       }
 
       if (isRecord(block) && block.type === "table") {
@@ -868,6 +951,16 @@ function getLinkedProtocolIdsFromBlocks(blocks: EntryBlock[]) {
   );
 }
 
+function getLinkedEntityIdsFromBlocks(blocks: EntryBlock[]) {
+  return Array.from(
+    new Set(
+      blocks.flatMap((block) =>
+        block.type === "entity" ? [block.entityId] : [],
+      ),
+    ),
+  );
+}
+
 function deriveEntryBodyText(
   blocks: EntryBlock[],
   protocolTitlesById: Map<string, string>,
@@ -882,7 +975,15 @@ function deriveEntryBodyText(
         const header = block.columns.join("\t");
         const rows = block.rows.map((row) => row.join("\t")).join("\n");
 
-        return [`Table`, header, rows].filter(Boolean).join("\n");
+        return [block.name ? `Table: ${block.name}` : "Table", header, rows]
+          .filter(Boolean)
+          .join("\n");
+      }
+
+      if (block.type === "entity") {
+        return block.label
+          ? `Entity: ${block.label}`
+          : `Entity: ${block.entityId}`;
       }
 
       return block.label
@@ -930,12 +1031,15 @@ function deriveEntrySummary(
     }
 
     if (block.type === "table") {
-      const namedColumns = block.columns.filter((column) => column.trim());
-      const summary = namedColumns.length
-        ? `Table: ${namedColumns.join(", ")}`
+      const summary = block.name?.trim()
+        ? `Table: ${block.name.trim()}`
         : `Table: ${block.columns.length} columns`;
 
       return truncateSummary(`${summary} (${block.rows.length} rows)`);
+    }
+
+    if (block.type === "entity") {
+      return truncateSummary(`Entity: ${block.label ?? block.entityId}`);
     }
 
     const protocolLabel =
@@ -963,8 +1067,18 @@ function toEntryBlocksJson(blocks: EntryBlock[]): Prisma.InputJsonValue {
       return {
         id: block.id,
         type: "table",
+        ...(block.name?.trim() ? { name: block.name.trim() } : {}),
         columns: block.columns,
         rows: block.rows,
+      };
+    }
+
+    if (block.type === "entity") {
+      return {
+        id: block.id,
+        type: "entity",
+        entityId: block.entityId,
+        ...(block.label ? { label: block.label } : {}),
       };
     }
 
@@ -977,18 +1091,20 @@ function toEntryBlocksJson(blocks: EntryBlock[]): Prisma.InputJsonValue {
   }) as unknown as Prisma.InputJsonValue;
 }
 
-function mapNavigatorEntry(entry: {
+function mapNavigatorRecord(entry: {
   id: string;
   title: string;
   slug: string;
   latestVersionNumber: number;
 }) {
   return {
+    kind: "entry",
     id: entry.id,
     title: entry.title,
     slug: entry.slug,
+    href: `/entries/${entry.id}`,
     latestVersionNumber: entry.latestVersionNumber,
-  } satisfies NotebookNavigatorEntry;
+  } satisfies NotebookNavigatorEntryRecord;
 }
 
 function buildNavigatorFolders(
@@ -1014,20 +1130,20 @@ function buildNavigatorFolders(
         name: folder.name,
         slug: folder.slug,
         parentFolderId: folder.parentFolderId,
-        entries: [] as NotebookNavigatorEntry[],
+        records: [] as NotebookNavigatorRecord[],
         childFolders: [] as NotebookNavigatorFolder[],
       },
     ]),
   );
-  const unfiledEntries: NotebookNavigatorEntry[] = [];
+  const unfiledRecords: NotebookNavigatorRecord[] = [];
 
   for (const entry of entries) {
-    const mappedEntry = mapNavigatorEntry(entry);
+    const mappedEntry = mapNavigatorRecord(entry);
 
     if (entry.folderId && foldersById.has(entry.folderId)) {
-      foldersById.get(entry.folderId)?.entries.push(mappedEntry);
+      foldersById.get(entry.folderId)?.records.push(mappedEntry);
     } else {
-      unfiledEntries.push(mappedEntry);
+      unfiledRecords.push(mappedEntry);
     }
   }
 
@@ -1052,7 +1168,7 @@ function buildNavigatorFolders(
 
   return {
     rootFolders,
-    unfiledEntries,
+    unfiledRecords,
   };
 }
 
@@ -1082,6 +1198,12 @@ function mapEntryRecord(
     }>;
   }
 ): EntryDetail {
+  const blocks = parseEntryBlocksFromVersion(
+    entry.versions[0]?.bodyJson ?? null,
+    entry.versions[0]?.bodyText ?? null,
+    entry.linkedProtocols,
+  );
+
   return {
     id: entry.id,
     title: entry.title,
@@ -1094,17 +1216,14 @@ function mapEntryRecord(
     updatedAt: entry.updatedAt,
     createdByName: entry.createdBy.name,
     bodyText: entry.versions[0]?.bodyText ?? null,
-    blocks: parseEntryBlocksFromVersion(
-      entry.versions[0]?.bodyJson ?? null,
-      entry.versions[0]?.bodyText ?? null,
-      entry.linkedProtocols,
-    ),
+    blocks,
     linkedProtocols: entry.linkedProtocols.map((reference) => ({
       id: reference.protocol.id,
       title: reference.protocol.title,
       slug: reference.protocol.slug,
       status: reference.protocol.status,
     })),
+    linkedEntityIds: getLinkedEntityIdsFromBlocks(blocks),
   };
 }
 
@@ -1233,7 +1352,7 @@ export async function getNotebookNavigatorForUser(
     return null;
   }
 
-  const { rootFolders, unfiledEntries } = buildNavigatorFolders(
+  const { rootFolders, unfiledRecords } = buildNavigatorFolders(
     repository.folders,
     repository.entries,
   );
@@ -1245,7 +1364,7 @@ export async function getNotebookNavigatorForUser(
       slug: repository.slug,
     },
     folders: rootFolders,
-    unfiledEntries,
+    unfiledRecords,
   };
 }
 
@@ -1351,11 +1470,21 @@ export async function createEntryDraftForUser(input: CreateEntryDraftInput) {
     );
     const derivedBodyText = deriveEntryBodyText(blocks, protocolTitlesById);
     const summary = explicitSummary ?? deriveEntrySummary(blocks, protocolTitlesById);
+    const requestedFolderId = input.folderId?.trim() || null;
+    const targetFolder = requestedFolderId
+      ? await tx.folder.findFirst({
+          where: {
+            id: requestedFolderId,
+            repositoryId: context.repository.id,
+          },
+          select: { id: true },
+        })
+      : null;
 
     const entry = await tx.entry.create({
       data: {
         repositoryId: context.repository.id,
-        folderId: context.rootFolder?.id,
+        folderId: targetFolder?.id ?? context.rootFolder?.id,
         createdById: input.userId,
         title,
         slug,

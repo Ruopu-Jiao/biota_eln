@@ -32,10 +32,90 @@ export interface DNARecord extends SequenceRecord {
   features: DNAFeature[];
 }
 
+export type SequenceEntityType = "plasmid" | "sgrna" | "primer";
+
+export interface SequenceEntityRecord extends DNARecord {
+  id: string;
+  entityType: SequenceEntityType;
+  description: string;
+  aliases: string[];
+}
+
+export interface SequenceEntityCatalog {
+  entities: SequenceEntityRecord[];
+}
+
 export interface FeatureRange {
   start: number;
   end: number;
 }
+
+const DNA_CODON_TABLE: Record<string, string> = {
+  TTT: "F",
+  TTC: "F",
+  TTA: "L",
+  TTG: "L",
+  TCT: "S",
+  TCC: "S",
+  TCA: "S",
+  TCG: "S",
+  TAT: "Y",
+  TAC: "Y",
+  TAA: "*",
+  TAG: "*",
+  TGT: "C",
+  TGC: "C",
+  TGA: "*",
+  TGG: "W",
+  CTT: "L",
+  CTC: "L",
+  CTA: "L",
+  CTG: "L",
+  CCT: "P",
+  CCC: "P",
+  CCA: "P",
+  CCG: "P",
+  CAT: "H",
+  CAC: "H",
+  CAA: "Q",
+  CAG: "Q",
+  CGT: "R",
+  CGC: "R",
+  CGA: "R",
+  CGG: "R",
+  ATT: "I",
+  ATC: "I",
+  ATA: "I",
+  ATG: "M",
+  ACT: "T",
+  ACC: "T",
+  ACA: "T",
+  ACG: "T",
+  AAT: "N",
+  AAC: "N",
+  AAA: "K",
+  AAG: "K",
+  AGT: "S",
+  AGC: "S",
+  AGA: "R",
+  AGG: "R",
+  GTT: "V",
+  GTC: "V",
+  GTA: "V",
+  GTG: "V",
+  GCT: "A",
+  GCC: "A",
+  GCA: "A",
+  GCG: "A",
+  GAT: "D",
+  GAC: "D",
+  GAA: "E",
+  GAG: "E",
+  GGT: "G",
+  GGC: "G",
+  GGA: "G",
+  GGG: "G",
+};
 
 const DNA_COMPLEMENT: Record<string, string> = {
   A: "T",
@@ -137,6 +217,25 @@ export function rotatePosition(position: number, offset: number, sequenceLength:
   return ((zeroBased - shift + sequenceLength) % sequenceLength) + 1;
 }
 
+export function sliceSequenceRange(
+  sequence: string,
+  start: number,
+  end: number,
+  topology: SequenceTopology = "linear",
+) {
+  const normalized = normalizeDnaSequence(sequence);
+
+  if (!normalized.length) {
+    return "";
+  }
+
+  if (topology === "linear" || start <= end) {
+    return normalized.slice(Math.max(0, start - 1), Math.max(0, end));
+  }
+
+  return `${normalized.slice(Math.max(0, start - 1))}${normalized.slice(0, Math.max(0, end))}`;
+}
+
 export function rotateFeatureRange(
   range: FeatureRange,
   offset: number,
@@ -187,4 +286,33 @@ export function formatFeatureRange(feature: Pick<DNAFeature, "start" | "end">) {
 
 export function formatGcContent(sequence: string) {
   return `${gcContent(sequence).toFixed(1)}%`;
+}
+
+export function translateCodon(codon: string) {
+  const normalized = normalizeDnaSequence(codon);
+
+  if (normalized.length !== 3) {
+    return "";
+  }
+
+  return DNA_CODON_TABLE[normalized] ?? "X";
+}
+
+export function translateDna(sequence: string, frame = 0) {
+  const normalized = normalizeDnaSequence(sequence);
+  let protein = "";
+
+  for (let index = frame; index <= normalized.length - 3; index += 3) {
+    protein += translateCodon(normalized.slice(index, index + 3));
+  }
+
+  return protein;
+}
+
+export function estimatePrimerTm(sequence: string) {
+  const normalized = normalizeDnaSequence(sequence);
+  const atCount = normalized.split("").filter((base) => base === "A" || base === "T").length;
+  const gcCount = normalized.length - atCount;
+
+  return 2 * atCount + 4 * gcCount;
 }

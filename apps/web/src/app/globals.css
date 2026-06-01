@@ -21,6 +21,7 @@ html[data-theme="obsidian"] {
   --glow-1: rgba(128, 214, 181, 0.08);
   --glow-2: rgba(120, 198, 255, 0.06);
   --grid-line: rgba(137, 149, 145, 0.05);
+  --document-surface: rgba(17, 22, 24, 0.88);
 }
 
 html[data-theme="paper"] {
@@ -43,6 +44,7 @@ html[data-theme="paper"] {
   --glow-1: rgba(210, 186, 138, 0.18);
   --glow-2: rgba(113, 104, 90, 0.08);
   --grid-line: rgba(113, 104, 90, 0.05);
+  --document-surface: #ffffff;
   color-scheme: light;
 }
 
@@ -66,6 +68,7 @@ html[data-theme="mist"] {
   --glow-1: rgba(202, 167, 255, 0.1);
   --glow-2: rgba(126, 208, 221, 0.08);
   --grid-line: rgba(154, 142, 188, 0.05);
+  --document-surface: rgba(23, 18, 34, 0.9);
 }
 
 @theme inline {

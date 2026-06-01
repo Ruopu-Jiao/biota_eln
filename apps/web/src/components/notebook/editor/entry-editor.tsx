@@ -1,19 +1,38 @@
 "use client";
 
-import { useRef, useState, type ReactElement, type SVGProps } from "react";
+import Link from "next/link";
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ButtonHTMLAttributes,
+  type MouseEvent as ReactMouseEvent,
+  type ReactElement,
+  type ReactNode,
+  type SVGProps,
+} from "react";
 import { SubmitButton } from "@/components/notebook/submit-button";
 import { MarkdownPreview } from "./markdown-preview";
+import { createTableFormulaResolver } from "./table-formulas";
 import type {
+  EntityOption,
   EntryEditorBlock,
+  EntryEntityBlock,
+  EntryProtocolBlock,
   EntryTableBlock,
+  EntryTextBlock,
   ProtocolOption,
 } from "./types";
 import {
+  buildSpreadsheetColumns,
   createDefaultEntryBlocks,
+  createEntityBlock,
   createProtocolBlock,
   createTableBlock,
   createTextBlock,
-  normalizeEntryEditorBlocks,
+  ensureInlineEntryEditorBlocks,
+  getSerializableEntryEditorBlocks,
   serializeEntryEditorValue,
 } from "./types";
 
@@ -22,6 +41,7 @@ type EntryEditorProps = {
   initialTitle?: string;
   initialBlocks?: EntryEditorBlock[];
   protocolOptions: ProtocolOption[];
+  entityOptions: EntityOption[];
   className?: string;
   formAction?: (formData: FormData) => void | Promise<void>;
   onChange?: (blocks: EntryEditorBlock[]) => void;
@@ -43,16 +63,29 @@ type MarkdownCommand =
 
 type IconProps = SVGProps<SVGSVGElement>;
 
-function NoteIcon(props: IconProps) {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" {...props}>
-      <path d="M7.5 4.75h9l3.25 3.25v11.5h-12.25z" />
-      <path d="M16.5 4.75v3.25h3.25" />
-      <path d="M9.5 10.75h5" />
-      <path d="M9.5 14.25h4" />
-    </svg>
-  );
-}
+type TextSelection = {
+  start: number;
+  end: number;
+};
+
+type PendingFocusTarget = {
+  blockId: string;
+  position: number;
+};
+
+type TableContextMenu =
+  | {
+      kind: "column";
+      index: number;
+      x: number;
+      y: number;
+    }
+  | {
+      kind: "row";
+      index: number;
+      x: number;
+      y: number;
+    };
 
 function ProtocolBlockIcon(props: IconProps) {
   return (
@@ -61,6 +94,19 @@ function ProtocolBlockIcon(props: IconProps) {
       <path d="M8 9.5h8" />
       <path d="M8 13.75h5" />
       <path d="M5.75 4.25h12.5v15.5H5.75z" />
+    </svg>
+  );
+}
+
+function EntityBlockIcon(props: IconProps) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" {...props}>
+      <path d="M7 4.5c4.5 0 5.5 4 10 4" />
+      <path d="M7 19.5c4.5 0 5.5-4 10-4" />
+      <path d="M7 4.5c0 4.5 4 5.5 4 10" />
+      <path d="M17 19.5c0-4.5-4-5.5-4-10" />
+      <path d="M6.5 8.5h11" />
+      <path d="M6.5 15.5h11" />
     </svg>
   );
 }
@@ -193,22 +239,6 @@ function EyeIcon(props: IconProps) {
   );
 }
 
-function ChevronUpIcon(props: IconProps) {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" {...props}>
-      <path d="m7 14 5-5 5 5" />
-    </svg>
-  );
-}
-
-function ChevronDownIcon(props: IconProps) {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" {...props}>
-      <path d="m7 10 5 5 5-5" />
-    </svg>
-  );
-}
-
 function TrashIcon(props: IconProps) {
   return (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" {...props}>
@@ -220,18 +250,6 @@ function TrashIcon(props: IconProps) {
       <path d="M13.5 10.25v4.5" />
     </svg>
   );
-}
-
-function moveBlock<T>(blocks: T[], fromIndex: number, toIndex: number) {
-  const nextBlocks = blocks.slice();
-  const [block] = nextBlocks.splice(fromIndex, 1);
-
-  if (!block) {
-    return blocks;
-  }
-
-  nextBlocks.splice(toIndex, 0, block);
-  return nextBlocks;
 }
 
 function insertAroundSelection(
@@ -287,29 +305,109 @@ function tableToCsv(block: EntryTableBlock) {
   return lines.join("\n");
 }
 
-function downloadTableCsv(block: EntryTableBlock) {
+function downloadTableCsv(block: EntryTableBlock, tableLabel: string) {
   const blob = new Blob([tableToCsv(block)], {
     type: "text/csv;charset=utf-8",
   });
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
+  const safeLabel = tableLabel
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
 
   link.href = url;
-  link.download = "entry-table.csv";
+  link.download = `${safeLabel || "entry-table"}.csv`;
   link.click();
   URL.revokeObjectURL(url);
 }
 
+function buildOrdinalMap(
+  blocks: EntryEditorBlock[],
+  type: EntryEditorBlock["type"],
+) {
+  let count = 0;
+  const ordinals = new Map<string, number>();
+
+  for (const block of blocks) {
+    if (block.type !== type) {
+      continue;
+    }
+
+    count += 1;
+    ordinals.set(block.id, count);
+  }
+
+  return ordinals;
+}
+
+function getBlockDescription(block: EntryEditorBlock) {
+  if (block.type === "table") {
+    return "Structured measurements, calculations, and reagent layouts.";
+  }
+
+  if (block.type === "entity") {
+    return "Sequence-backed references to plasmids, primers, and guides.";
+  }
+
+  if (block.type === "protocol") {
+    return "Reusable protocol references from the library.";
+  }
+
+  return "Freeform markdown writing.";
+}
+
+function lineCount(value: string) {
+  return value.split("\n").length;
+}
+
+const iconButtonStyles =
+  "inline-flex h-9 w-9 items-center justify-center border border-[color:var(--line)] text-[color:var(--text-muted)] transition hover:border-[color:var(--line-strong)] hover:text-[color:var(--text-primary)] disabled:opacity-40";
+const quietButtonStyles =
+  "inline-flex min-h-9 items-center justify-center border border-[color:var(--line)] px-3 text-[11px] uppercase tracking-[0.16em] text-[color:var(--text-muted)] transition hover:border-[color:var(--line-strong)] hover:text-[color:var(--text-primary)]";
+const primaryButtonStyles =
+  "inline-flex min-h-10 items-center justify-center border border-[color:var(--accent-soft)] bg-[color:var(--accent-muted)] px-4 text-sm font-medium text-[color:var(--text-primary)] transition hover:border-[color:var(--accent-strong)] hover:bg-[color:var(--accent-soft)] disabled:cursor-not-allowed disabled:opacity-60";
+
+function IconActionButton({
+  label,
+  children,
+  className = iconButtonStyles,
+  outerClassName,
+  ...props
+}: {
+  label: string;
+  children: ReactNode;
+  className?: string;
+  outerClassName?: string;
+} & Omit<ButtonHTMLAttributes<HTMLButtonElement>, "children">) {
+  return (
+    <div className={`group relative inline-flex ${outerClassName ?? ""}`}>
+      <button
+        {...props}
+        title={label}
+        aria-label={label}
+        className={className}
+      >
+        {children}
+        <span className="sr-only">{label}</span>
+      </button>
+      <span className="pointer-events-none absolute bottom-full left-1/2 z-20 mb-2 -translate-x-1/2 whitespace-nowrap border border-[color:var(--line)] bg-[color:var(--surface-strong)] px-2 py-1 text-[10px] uppercase tracking-[0.14em] text-[color:var(--text-muted)] opacity-0 shadow-lg transition group-hover:opacity-100 group-focus-within:opacity-100">
+        {label}
+      </span>
+    </div>
+  );
+}
+
 function MarkdownToolbar({
-  blockId,
   onApply,
   previewVisible,
   onTogglePreview,
+  disabled = false,
 }: {
-  blockId: string;
-  onApply: (blockId: string, command: MarkdownCommand) => void;
+  onApply: (command: MarkdownCommand) => void;
   previewVisible: boolean;
-  onTogglePreview: (blockId: string) => void;
+  onTogglePreview: () => void;
+  disabled?: boolean;
 }) {
   const commands: Array<{
     command: MarkdownCommand;
@@ -331,50 +429,90 @@ function MarkdownToolbar({
   return (
     <div className="flex flex-wrap items-center gap-1.5 border-b border-[color:var(--line)] pb-3">
       {commands.map(({ command, label, Icon }) => (
-        <button
+        <IconActionButton
           key={command}
           type="button"
-          onClick={() => onApply(blockId, command)}
-          title={label}
-          aria-label={label}
-          className="inline-flex h-9 w-9 items-center justify-center border border-[color:var(--line)] text-[color:var(--text-muted)] transition hover:border-[color:var(--line-strong)] hover:text-[color:var(--text-primary)]"
+          onClick={() => onApply(command)}
+          label={label}
+          disabled={disabled}
         >
           <Icon className="h-4 w-4" />
-          <span className="sr-only">{label}</span>
-        </button>
+        </IconActionButton>
       ))}
-      <button
+      <IconActionButton
         type="button"
-        onClick={() => onTogglePreview(blockId)}
-        title={previewVisible ? "Hide preview" : "Preview"}
-        aria-label={previewVisible ? "Hide preview" : "Preview"}
-        className="ml-auto inline-flex h-9 w-9 items-center justify-center border border-[color:var(--line)] text-[color:var(--accent-strong)] transition hover:border-[color:var(--accent-soft)]"
+        onClick={onTogglePreview}
+        label={previewVisible ? "Hide preview" : "Preview"}
+        className={`${iconButtonStyles} text-[color:var(--accent-strong)] hover:border-[color:var(--accent-soft)]`}
+        outerClassName="ml-auto"
       >
         <EyeIcon className="h-4 w-4" />
-        <span className="sr-only">{previewVisible ? "Hide preview" : "Preview"}</span>
-      </button>
+      </IconActionButton>
     </div>
   );
 }
 
 function TableBlockEditor({
   block,
-  blockIndex,
+  tableNumber,
+  onRemove,
   onChange,
 }: {
   block: EntryTableBlock;
-  blockIndex: number;
+  tableNumber: number;
+  onRemove: () => void;
   onChange: (nextBlock: EntryTableBlock) => void;
 }) {
-  function updateColumn(columnIndex: number, value: string) {
-    const columns = block.columns.slice();
-    columns[columnIndex] = value;
-    onChange({
+  const [activeCellId, setActiveCellId] = useState<string | null>(null);
+  const [contextMenu, setContextMenu] = useState<TableContextMenu | null>(null);
+  const resolveFormulaCell = useMemo(
+    () => createTableFormulaResolver(block),
+    [block],
+  );
+  const tableLabel = block.name?.trim() || `Table ${tableNumber}`;
+
+  useEffect(() => {
+    if (!contextMenu) {
+      return;
+    }
+
+    function closeContextMenu() {
+      setContextMenu(null);
+    }
+
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        closeContextMenu();
+      }
+    }
+
+    window.addEventListener("pointerdown", closeContextMenu);
+    window.addEventListener("scroll", closeContextMenu, true);
+    window.addEventListener("keydown", handleKeyDown);
+
+    return () => {
+      window.removeEventListener("pointerdown", closeContextMenu);
+      window.removeEventListener("scroll", closeContextMenu, true);
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [contextMenu]);
+
+  function setColumnCount(columnCount: number, rows: string[][]) {
+    const columns = buildSpreadsheetColumns(columnCount);
+
+    return {
       ...block,
       columns,
-      rows: block.rows.map((row) =>
+      rows: rows.map((row) =>
         Array.from({ length: columns.length }, (_, index) => row[index] ?? ""),
       ),
+    } satisfies EntryTableBlock;
+  }
+
+  function updateName(value: string) {
+    onChange({
+      ...block,
+      name: value,
     });
   }
 
@@ -391,12 +529,7 @@ function TableBlockEditor({
   }
 
   function addColumn() {
-    const nextColumnNumber = block.columns.length + 1;
-    onChange({
-      ...block,
-      columns: [...block.columns, `Column ${nextColumnNumber}`],
-      rows: block.rows.map((row) => [...row, ""]),
-    });
+    onChange(setColumnCount(block.columns.length + 1, block.rows));
   }
 
   function removeColumn(columnIndex: number) {
@@ -404,13 +537,14 @@ function TableBlockEditor({
       return;
     }
 
-    onChange({
-      ...block,
-      columns: block.columns.filter((_, index) => index !== columnIndex),
-      rows: block.rows.map((row) =>
-        row.filter((_, index) => index !== columnIndex),
+    setActiveCellId(null);
+    setContextMenu(null);
+    onChange(
+      setColumnCount(
+        block.columns.length - 1,
+        block.rows.map((row) => row.filter((_, index) => index !== columnIndex)),
       ),
-    });
+    );
   }
 
   function addRow() {
@@ -425,65 +559,103 @@ function TableBlockEditor({
       return;
     }
 
+    setActiveCellId(null);
+    setContextMenu(null);
     onChange({
       ...block,
       rows: block.rows.filter((_, index) => index !== rowIndex),
     });
   }
 
-  return (
-    <div className="space-y-4">
-      <div className="flex flex-wrap items-center gap-2 border-b border-[color:var(--line)] pb-3">
-        <button
-          type="button"
-          onClick={addColumn}
-          className="inline-flex items-center border border-[color:var(--line)] px-2.5 py-1.5 text-[11px] uppercase tracking-[0.16em] text-[color:var(--text-muted)] transition hover:border-[color:var(--line-strong)] hover:text-[color:var(--text-primary)]"
-        >
-          Add column
-        </button>
-        <button
-          type="button"
-          onClick={addRow}
-          className="inline-flex items-center border border-[color:var(--line)] px-2.5 py-1.5 text-[11px] uppercase tracking-[0.16em] text-[color:var(--text-muted)] transition hover:border-[color:var(--line-strong)] hover:text-[color:var(--text-primary)]"
-        >
-          Add row
-        </button>
-        <button
-          type="button"
-          onClick={() => downloadTableCsv(block)}
-          className="ml-auto inline-flex items-center border border-[color:var(--line)] px-2.5 py-1.5 text-[11px] uppercase tracking-[0.16em] text-[color:var(--accent-strong)] transition hover:border-[color:var(--accent-soft)]"
-        >
-          Export CSV
-        </button>
-      </div>
+  function openColumnContextMenu(
+    event: ReactMouseEvent<HTMLTableCellElement>,
+    columnIndex: number,
+  ) {
+    event.preventDefault();
+    setContextMenu({
+      kind: "column",
+      index: columnIndex,
+      x: event.clientX,
+      y: event.clientY,
+    });
+  }
 
-      <div className="overflow-x-auto border border-[color:var(--line)]">
-        <table className="min-w-full border-collapse">
+  function openRowContextMenu(
+    event: ReactMouseEvent<HTMLTableCellElement>,
+    rowIndex: number,
+  ) {
+    event.preventDefault();
+    setContextMenu({
+      kind: "row",
+      index: rowIndex,
+      x: event.clientX,
+      y: event.clientY,
+    });
+  }
+
+  return (
+    <section className="space-y-0 border-y border-[color:var(--line)] py-4">
+      <div className="border border-[color:var(--line)] bg-[color:var(--surface)]">
+        <div className="flex flex-wrap items-start justify-between gap-4 border-b border-[color:var(--line)] px-4 py-3">
+          <div className="min-w-0 flex-1">
+            <p className="font-mono text-[11px] uppercase tracking-[0.22em] text-[color:var(--text-soft)]">
+              Table
+            </p>
+            <input
+              value={block.name ?? ""}
+              onChange={(event) => updateName(event.target.value)}
+              aria-label={`Table ${tableNumber} name`}
+              placeholder={tableLabel}
+              className="mt-2 w-full max-w-xl border-0 bg-transparent px-0 py-0 text-base font-medium text-[color:var(--text-primary)] outline-none placeholder:text-[color:var(--text-soft)]"
+            />
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={addRow}
+              className={quietButtonStyles}
+            >
+              Add row
+            </button>
+            <button
+              type="button"
+              onClick={addColumn}
+              className={quietButtonStyles}
+            >
+              Add column
+            </button>
+            <button
+              type="button"
+              onClick={() => downloadTableCsv(block, tableLabel)}
+              className={quietButtonStyles}
+            >
+              Export CSV
+            </button>
+            <button
+              type="button"
+              onClick={onRemove}
+              className={`${quietButtonStyles} hover:border-[color:var(--danger-soft)] hover:text-[color:var(--danger)]`}
+            >
+              Remove table
+            </button>
+          </div>
+        </div>
+
+        <div className="overflow-x-auto">
+          <table className="min-w-full border-collapse">
           <thead>
             <tr className="border-b border-[color:var(--line)] bg-[color:var(--surface-muted)]">
+              <th className="w-16 border-r border-[color:var(--line)] px-3 py-2 text-left font-mono text-[11px] uppercase tracking-[0.16em] text-[color:var(--text-soft)]">
+                #
+              </th>
               {block.columns.map((column, columnIndex) => (
                 <th
                   key={`${block.id}-column-${columnIndex}`}
-                  className="min-w-[180px] border-r border-[color:var(--line)] px-3 py-2 text-left align-top last:border-r-0"
+                  onContextMenu={(event) => openColumnContextMenu(event, columnIndex)}
+                  className="min-w-[180px] cursor-context-menu border-r border-[color:var(--line)] px-3 py-2 text-left align-top font-mono text-xs uppercase tracking-[0.18em] text-[color:var(--text-primary)] last:border-r-0"
+                  scope="col"
                 >
-                  <div className="space-y-2">
-                    <input
-                      value={column}
-                      onChange={(event) =>
-                        updateColumn(columnIndex, event.target.value)
-                      }
-                      aria-label={`Table ${blockIndex + 1} column ${columnIndex + 1}`}
-                      className="w-full border-b border-[color:var(--line)] bg-transparent px-0 py-1 text-sm font-medium text-[color:var(--text-primary)] outline-none focus:border-[color:var(--accent-strong)]"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => removeColumn(columnIndex)}
-                      disabled={block.columns.length <= 1}
-                      className="text-[11px] uppercase tracking-[0.16em] text-[color:var(--text-soft)] transition hover:text-[color:var(--danger)] disabled:opacity-40"
-                    >
-                      Remove
-                    </button>
-                  </div>
+                  {column}
                 </th>
               ))}
             </tr>
@@ -494,38 +666,276 @@ function TableBlockEditor({
                 key={`${block.id}-row-${rowIndex}`}
                 className="border-b border-[color:var(--line)] last:border-b-0"
               >
-                {row.map((cell, columnIndex) => (
-                  <td
-                    key={`${block.id}-cell-${rowIndex}-${columnIndex}`}
-                    className="border-r border-[color:var(--line)] px-3 py-2 align-top last:border-r-0"
-                  >
-                    <input
-                      value={cell}
-                      onChange={(event) =>
-                        updateCell(rowIndex, columnIndex, event.target.value)
-                      }
-                      aria-label={`Table ${blockIndex + 1} row ${rowIndex + 1} column ${columnIndex + 1}`}
-                      className="w-full bg-transparent text-sm text-[color:var(--text-primary)] outline-none placeholder:text-[color:var(--text-soft)]"
-                      placeholder="Cell value"
-                    />
-                  </td>
-                ))}
-                <td className="w-14 px-2 py-2 text-right">
-                  <button
-                    type="button"
-                    onClick={() => removeRow(rowIndex)}
-                    disabled={block.rows.length <= 1}
-                    className="text-[11px] uppercase tracking-[0.16em] text-[color:var(--text-soft)] transition hover:text-[color:var(--danger)] disabled:opacity-40"
-                  >
-                    Del
-                  </button>
-                </td>
+                <th
+                  onContextMenu={(event) => openRowContextMenu(event, rowIndex)}
+                  className="w-16 cursor-context-menu border-r border-[color:var(--line)] bg-[color:var(--surface-muted)] px-3 py-2 text-left align-top font-mono text-xs text-[color:var(--text-soft)]"
+                  scope="row"
+                >
+                  {rowIndex + 1}
+                </th>
+                {block.columns.map((_, columnIndex) => {
+                  const currentCellId = `${rowIndex}:${columnIndex}`;
+                  const active = activeCellId === currentCellId;
+                  const cell = row[columnIndex] ?? "";
+                  const cellDisplay = resolveFormulaCell(rowIndex, columnIndex);
+
+                  return (
+                    <td
+                      key={`${block.id}-cell-${rowIndex}-${columnIndex}`}
+                      className="border-r border-[color:var(--line)] px-3 py-2 align-top last:border-r-0"
+                    >
+                      <div className="space-y-1">
+                        <input
+                          value={active ? cell : cellDisplay.displayValue}
+                          onChange={(event) =>
+                            updateCell(rowIndex, columnIndex, event.target.value)
+                          }
+                          onFocus={() => setActiveCellId(currentCellId)}
+                          onBlur={() =>
+                            setActiveCellId((current) =>
+                              current === currentCellId ? null : current,
+                            )
+                          }
+                          aria-label={`Table ${tableNumber} row ${rowIndex + 1} column ${columnIndex + 1}`}
+                          spellCheck={false}
+                          autoComplete="off"
+                          title={
+                            cellDisplay.isFormula
+                              ? cellDisplay.error ?? cellDisplay.formula ?? "Formula cell"
+                              : "Cell value"
+                          }
+                          className="w-full bg-transparent text-sm text-[color:var(--text-primary)] outline-none placeholder:text-[color:var(--text-soft)]"
+                        />
+                        {cellDisplay.isFormula ? (
+                          <div
+                            className="flex items-center justify-between gap-2 font-mono text-[10px] uppercase tracking-[0.12em]"
+                            title={cellDisplay.error ?? cellDisplay.formula ?? undefined}
+                          >
+                            <span className="truncate text-[color:var(--text-soft)]">
+                              {cellDisplay.formula}
+                            </span>
+                            <span
+                              className={
+                                cellDisplay.error
+                                  ? "text-[color:var(--danger)]"
+                                  : "text-[color:var(--accent-strong)]"
+                              }
+                            >
+                              {cellDisplay.error ? "Error" : "fx"}
+                            </span>
+                          </div>
+                        ) : null}
+                      </div>
+                    </td>
+                  );
+                })}
               </tr>
             ))}
           </tbody>
-        </table>
+          </table>
+        </div>
       </div>
+
+      {contextMenu ? (
+        <div
+          className="fixed z-30 min-w-[180px] border border-[color:var(--line)] bg-[color:var(--surface-strong)] p-1 shadow-2xl"
+          style={{
+            left: contextMenu.x + 8,
+            top: contextMenu.y + 8,
+          }}
+        >
+          <button
+            type="button"
+            onClick={() =>
+              contextMenu.kind === "column"
+                ? removeColumn(contextMenu.index)
+                : removeRow(contextMenu.index)
+            }
+            disabled={
+              contextMenu.kind === "column"
+                ? block.columns.length <= 1
+                : block.rows.length <= 1
+            }
+            className="flex w-full items-center justify-between gap-3 px-3 py-2 text-left text-sm text-[color:var(--text-primary)] transition hover:bg-[color:var(--surface-muted)] disabled:cursor-not-allowed disabled:text-[color:var(--text-soft)]"
+          >
+            <span>
+              {contextMenu.kind === "column"
+                ? `Delete column ${block.columns[contextMenu.index]}`
+                : `Delete row ${contextMenu.index + 1}`}
+            </span>
+            <span className="font-mono text-[11px] uppercase tracking-[0.14em] text-[color:var(--text-soft)]">
+              Delete
+            </span>
+          </button>
+        </div>
+      ) : null}
+    </section>
+  );
+}
+
+function EntityBlockEditor({
+  block,
+  entityNumber,
+  entityOptions,
+  onChange,
+}: {
+  block: EntryEntityBlock;
+  entityNumber: number;
+  entityOptions: EntityOption[];
+  onChange: (nextBlock: EntryEntityBlock) => void;
+}) {
+  const entity = entityOptions.find((option) => option.id === block.entityId) ?? null;
+
+  return (
+    <div className="space-y-3">
+      <label className="block space-y-2">
+        <span className="text-[11px] uppercase tracking-[0.22em] text-[color:var(--text-soft)]">
+          Linked entity
+        </span>
+        <select
+          value={block.entityId}
+          onChange={(event) =>
+            onChange({
+              ...block,
+              entityId: event.target.value,
+            })
+          }
+          aria-label={`Entity block ${entityNumber}`}
+          className="w-full border-b border-[color:var(--line)] bg-transparent px-0 py-2 text-sm text-[color:var(--text-primary)] outline-none focus:border-[color:var(--accent-strong)]"
+        >
+          <option value="">Select an entity</option>
+          {entityOptions.map((option) => (
+            <option key={option.id} value={option.id}>
+              {option.title}
+            </option>
+          ))}
+        </select>
+      </label>
+
+      {entity ? (
+        <div className="space-y-3 border-l border-[color:var(--line)] pl-4 text-sm text-[color:var(--text-muted)]">
+          <div className="flex flex-wrap items-center gap-2 font-mono text-[11px] uppercase tracking-[0.16em] text-[color:var(--text-soft)]">
+            <span>{entity.typeLabel}</span>
+            <span>{entity.sequenceLength.toLocaleString()} bp</span>
+            <span>{entity.topology}</span>
+          </div>
+          <p className="leading-7">
+            {entity.summary ?? "Sequence-backed record linked into this entry."}
+          </p>
+          <Link
+            href={`/entities/${entity.id}`}
+            className={quietButtonStyles}
+          >
+            Open in DNA viewer
+          </Link>
+        </div>
+      ) : (
+        <div className="text-sm leading-7 text-[color:var(--text-soft)]">
+          Select an entity to link a real sequence-backed record into this document.
+        </div>
+      )}
     </div>
+  );
+}
+
+function ProtocolBlockEditor({
+  block,
+  protocolNumber,
+  protocolOptions,
+  onChange,
+}: {
+  block: EntryProtocolBlock;
+  protocolNumber: number;
+  protocolOptions: ProtocolOption[];
+  onChange: (nextBlock: EntryProtocolBlock) => void;
+}) {
+  const protocol =
+    protocolOptions.find((option) => option.id === block.protocolId) ?? null;
+
+  return (
+    <div className="space-y-3">
+      <label className="block space-y-2">
+        <span className="text-[11px] uppercase tracking-[0.22em] text-[color:var(--text-soft)]">
+          Linked protocol
+        </span>
+        <select
+          value={block.protocolId}
+          onChange={(event) =>
+            onChange({
+              ...block,
+              protocolId: event.target.value,
+            })
+          }
+          aria-label={`Protocol block ${protocolNumber}`}
+          className="w-full border-b border-[color:var(--line)] bg-transparent px-0 py-2 text-sm text-[color:var(--text-primary)] outline-none focus:border-[color:var(--accent-strong)]"
+        >
+          <option value="">Select a protocol</option>
+          {protocolOptions.map((option) => (
+            <option key={option.id} value={option.id}>
+              {option.title}
+            </option>
+          ))}
+        </select>
+      </label>
+
+      {protocol ? (
+        <div className="space-y-3 border-l border-[color:var(--line)] pl-4 text-sm text-[color:var(--text-muted)]">
+          <div className="flex flex-wrap items-center gap-2 font-mono text-[11px] uppercase tracking-[0.16em] text-[color:var(--text-soft)]">
+            <span>{protocol.status ?? "Draft"}</span>
+            <span>{protocol.slug}</span>
+          </div>
+          <p className="leading-7">
+            {protocol.summary ?? "Reusable protocol inserted into this entry."}
+          </p>
+          <Link
+            href={`/protocols/${protocol.id}`}
+            className={quietButtonStyles}
+          >
+            Open protocol
+          </Link>
+        </div>
+      ) : (
+        <div className="text-sm leading-7 text-[color:var(--text-soft)]">
+          Select a protocol to insert a reusable method block into the document flow.
+        </div>
+      )}
+    </div>
+  );
+}
+
+function EmbedBlockShell({
+  block,
+  onRemove,
+  children,
+}: {
+  block: EntryProtocolBlock | EntryEntityBlock;
+  onRemove: () => void;
+  children: ReactNode;
+}) {
+  const label = block.type === "entity" ? "Entity" : "Protocol";
+
+  return (
+    <section className="space-y-4 border-y border-[color:var(--line)] py-4">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="space-y-1">
+          <p className="font-mono text-[11px] uppercase tracking-[0.22em] text-[color:var(--text-soft)]">
+            {label}
+          </p>
+          <p className="text-sm leading-7 text-[color:var(--text-muted)]">
+            {getBlockDescription(block)}
+          </p>
+        </div>
+        <IconActionButton
+          type="button"
+          onClick={onRemove}
+          label={`Remove ${label.toLowerCase()} block`}
+          className={`${iconButtonStyles} hover:border-[color:var(--danger-soft)] hover:text-[color:var(--danger)]`}
+        >
+          <TrashIcon className="h-4 w-4" />
+        </IconActionButton>
+      </div>
+      {children}
+    </section>
   );
 }
 
@@ -534,75 +944,223 @@ export function EntryEditor({
   initialTitle = "",
   initialBlocks,
   protocolOptions,
+  entityOptions,
   className,
   formAction,
   onChange,
   submitLabel = "Save new version",
   pendingLabel = "Saving...",
 }: EntryEditorProps) {
-  const [title, setTitle] = useState(initialTitle);
-  const [blocks, setBlocks] = useState<EntryEditorBlock[]>(
-    normalizeEntryEditorBlocks(initialBlocks ?? createDefaultEntryBlocks()),
+  const initialEditorBlocks = useMemo(
+    () =>
+      ensureInlineEntryEditorBlocks(
+        initialBlocks?.length ? initialBlocks : createDefaultEntryBlocks(),
+      ),
+    [initialBlocks],
   );
-  const [previewByBlockId, setPreviewByBlockId] = useState<
-    Record<string, boolean>
-  >({});
-  const textareaRefs = useRef<Record<string, HTMLTextAreaElement | null>>({});
+  const [title, setTitle] = useState(initialTitle);
+  const [blocks, setBlocks] = useState<EntryEditorBlock[]>(initialEditorBlocks);
+  const [previewVisible, setPreviewVisible] = useState(false);
+  const [interactiveReady, setInteractiveReady] = useState(false);
+  const [activeTextBlockId, setActiveTextBlockId] = useState<string | null>(
+    initialEditorBlocks.find(
+      (block): block is EntryTextBlock => block.type === "text",
+    )?.id ?? null,
+  );
+  const textBlockRefs = useRef<Record<string, HTMLTextAreaElement | null>>({});
+  const textSelectionsRef = useRef<Record<string, TextSelection>>({});
+  const pendingFocusRef = useRef<PendingFocusTarget | null>(null);
   const serializedValue = serializeEntryEditorValue(blocks);
+  const activeTextBlock = useMemo(
+    () =>
+      blocks.find(
+        (block): block is EntryTextBlock =>
+          block.type === "text" && block.id === activeTextBlockId,
+      ) ??
+      blocks.find((block): block is EntryTextBlock => block.type === "text") ??
+      null,
+    [activeTextBlockId, blocks],
+  );
+  const tableNumberById = useMemo(() => buildOrdinalMap(blocks, "table"), [blocks]);
+  const entityNumberById = useMemo(() => buildOrdinalMap(blocks, "entity"), [blocks]);
+  const protocolNumberById = useMemo(
+    () => buildOrdinalMap(blocks, "protocol"),
+    [blocks],
+  );
+  const insertableBlockCount = useMemo(
+    () => getSerializableEntryEditorBlocks(blocks).filter((block) => block.type !== "text").length,
+    [blocks],
+  );
 
-  function commit(nextBlocks: EntryEditorBlock[]) {
-    const normalized = normalizeEntryEditorBlocks(nextBlocks);
-    setBlocks(normalized);
-    onChange?.(normalized);
-  }
+  useEffect(() => {
+    const frame = window.requestAnimationFrame(() => {
+      setInteractiveReady(true);
+    });
 
-  function addMarkdownBlock() {
-    commit([...blocks, createTextBlock()]);
-  }
+    return () => {
+      window.cancelAnimationFrame(frame);
+    };
+  }, []);
 
-  function addProtocolInsertion() {
-    commit([...blocks, createProtocolBlock(protocolOptions[0]?.id ?? "")]);
-  }
+  useEffect(() => {
+    const pendingFocus = pendingFocusRef.current;
 
-  function addTableInsertion() {
-    commit([...blocks, createTableBlock()]);
-  }
-
-  function updateBlock(index: number, nextBlock: EntryEditorBlock) {
-    const nextBlocks = blocks.slice();
-    nextBlocks[index] = nextBlock;
-    commit(nextBlocks);
-  }
-
-  function removeBlock(index: number) {
-    commit(blocks.filter((_, currentIndex) => currentIndex !== index));
-  }
-
-  function moveUp(index: number) {
-    if (index <= 0) {
+    if (!pendingFocus) {
       return;
     }
 
-    commit(moveBlock(blocks, index, index - 1));
+    const frame = window.requestAnimationFrame(() => {
+      const textarea = textBlockRefs.current[pendingFocus.blockId];
+
+      if (!textarea) {
+        return;
+      }
+
+      textarea.focus();
+      textarea.setSelectionRange(pendingFocus.position, pendingFocus.position);
+      textSelectionsRef.current[pendingFocus.blockId] = {
+        start: pendingFocus.position,
+        end: pendingFocus.position,
+      };
+      pendingFocusRef.current = null;
+    });
+
+    return () => {
+      window.cancelAnimationFrame(frame);
+    };
+  }, [blocks]);
+
+  function emitChange(nextBlocks: EntryEditorBlock[]) {
+    onChange?.(getSerializableEntryEditorBlocks(nextBlocks));
   }
 
-  function moveDown(index: number) {
-    if (index >= blocks.length - 1) {
+  function commitBlocks(
+    nextBlocks: EntryEditorBlock[],
+    focusTarget?: PendingFocusTarget,
+  ) {
+    const inlineBlocks = ensureInlineEntryEditorBlocks(nextBlocks);
+    pendingFocusRef.current = focusTarget ?? null;
+    setBlocks(inlineBlocks);
+    emitChange(inlineBlocks);
+  }
+
+  function updateTextBlock(blockId: string, content: string) {
+    const nextBlocks = blocks.map((block) =>
+      block.id === blockId && block.type === "text"
+        ? {
+            ...block,
+            content,
+          }
+        : block,
+    );
+
+    setBlocks(nextBlocks);
+    emitChange(nextBlocks);
+  }
+
+  function updateEmbedBlock(
+    blockId: string,
+    nextBlock: EntryProtocolBlock | EntryEntityBlock | EntryTableBlock,
+  ) {
+    commitBlocks(
+      blocks.map((block) => (block.id === blockId ? nextBlock : block)),
+    );
+  }
+
+  function removeEmbedBlock(blockId: string) {
+    commitBlocks(blocks.filter((block) => block.id !== blockId));
+  }
+
+  function rememberSelection(blockId: string) {
+    const textarea = textBlockRefs.current[blockId];
+
+    if (!textarea) {
       return;
     }
 
-    commit(moveBlock(blocks, index, index + 1));
+    textSelectionsRef.current[blockId] = {
+      start: textarea.selectionStart,
+      end: textarea.selectionEnd,
+    };
   }
 
-  function togglePreview(blockId: string) {
-    setPreviewByBlockId((current) => ({
-      ...current,
-      [blockId]: !current[blockId],
-    }));
+  function getSelectionForBlock(block: EntryTextBlock): TextSelection {
+    const textarea = textBlockRefs.current[block.id];
+
+    if (textarea) {
+      return {
+        start: textarea.selectionStart,
+        end: textarea.selectionEnd,
+      };
+    }
+
+    return (
+      textSelectionsRef.current[block.id] ?? {
+        start: block.content.length,
+        end: block.content.length,
+      }
+    );
   }
 
-  function applyMarkdownCommand(blockId: string, command: MarkdownCommand) {
-    const textarea = textareaRefs.current[blockId];
+  function insertInlineBlock(
+    blockFactory: () => EntryProtocolBlock | EntryEntityBlock | EntryTableBlock,
+  ) {
+    if (!interactiveReady || previewVisible) {
+      return;
+    }
+
+    const newBlock = blockFactory();
+
+    if (activeTextBlock) {
+      const activeIndex = blocks.findIndex((block) => block.id === activeTextBlock.id);
+      const selection = getSelectionForBlock(activeTextBlock);
+      const insertionPoint = selection.start;
+      const before = activeTextBlock.content.slice(0, insertionPoint);
+      const after = activeTextBlock.content.slice(insertionPoint);
+      const trailingTextBlock = createTextBlock(after);
+      const replacement: EntryEditorBlock[] = [];
+
+      if (before.length) {
+        replacement.push({
+          ...activeTextBlock,
+          content: before,
+        });
+      }
+
+      replacement.push(newBlock, trailingTextBlock);
+
+      commitBlocks(
+        [
+          ...blocks.slice(0, activeIndex),
+          ...replacement,
+          ...blocks.slice(activeIndex + 1),
+        ],
+        {
+          blockId: trailingTextBlock.id,
+          position: 0,
+        },
+      );
+
+      return;
+    }
+
+    const trailingTextBlock = createTextBlock();
+    commitBlocks([...blocks, newBlock, trailingTextBlock], {
+      blockId: trailingTextBlock.id,
+      position: 0,
+    });
+  }
+
+  function togglePreview() {
+    setPreviewVisible((current) => !current);
+  }
+
+  function applyMarkdownCommand(command: MarkdownCommand) {
+    if (!activeTextBlock) {
+      return;
+    }
+
+    const textarea = textBlockRefs.current[activeTextBlock.id];
 
     if (!textarea) {
       return;
@@ -630,20 +1188,8 @@ export function EntryEditor({
       prefixSelectionLines(textarea, "- [ ] ", "Action item");
     }
 
-    const nextValue = textarea.value;
-    const blockIndex = blocks.findIndex(
-      (block) => block.id === blockId && block.type === "text",
-    );
-
-    if (blockIndex === -1) {
-      return;
-    }
-
-    updateBlock(blockIndex, {
-      id: blockId,
-      type: "text",
-      content: nextValue,
-    });
+    rememberSelection(activeTextBlock.id);
+    updateTextBlock(activeTextBlock.id, textarea.value);
   }
 
   return (
@@ -661,200 +1207,174 @@ export function EntryEditor({
             className="w-full bg-transparent px-0 py-0 text-5xl font-semibold tracking-[-0.06em] text-[color:var(--text-primary)] outline-none placeholder:text-[color:var(--text-soft)]"
             placeholder="Untitled entry"
           />
+
           <div className="mt-4 flex flex-wrap items-center gap-2 text-[11px] uppercase tracking-[0.22em] text-[color:var(--text-soft)]">
             <span>Document canvas</span>
             <span className="text-[color:var(--line-strong)]">/</span>
-            <span>{blocks.length} blocks</span>
+            <span>{insertableBlockCount} inline embeds</span>
+            <span className="ml-auto">
+              {previewVisible
+                ? "Preview mode"
+                : activeTextBlock
+                  ? "Insert at cursor"
+                  : "Focus a writing region"}
+            </span>
           </div>
-          <div className="flex flex-wrap items-center gap-2">
-            <button
-              type="button"
-              onClick={addMarkdownBlock}
-              title="Add note"
-              aria-label="Add note"
-              className="inline-flex h-10 w-10 items-center justify-center border border-[color:var(--line)] text-[color:var(--text-muted)] transition hover:border-[color:var(--line-strong)] hover:text-[color:var(--text-primary)]"
-            >
-              <NoteIcon className="h-4 w-4" />
-              <span className="sr-only">Add note</span>
-            </button>
-            <button
-              type="button"
-              onClick={addProtocolInsertion}
-              title="Add protocol"
-              aria-label="Add protocol"
-              className="inline-flex h-10 w-10 items-center justify-center border border-[color:var(--line)] text-[color:var(--text-muted)] transition hover:border-[color:var(--line-strong)] hover:text-[color:var(--text-primary)]"
-            >
-              <ProtocolBlockIcon className="h-4 w-4" />
-              <span className="sr-only">Add protocol</span>
-            </button>
-            <button
-              type="button"
-              onClick={addTableInsertion}
-              title="Add table"
-              aria-label="Add table"
-              className="inline-flex h-10 w-10 items-center justify-center border border-[color:var(--line)] text-[color:var(--text-muted)] transition hover:border-[color:var(--line-strong)] hover:text-[color:var(--text-primary)]"
-            >
-              <TableBlockIcon className="h-4 w-4" />
-              <span className="sr-only">Add table</span>
-            </button>
+
+          <div className="mt-4 space-y-3">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="font-mono text-[11px] uppercase tracking-[0.18em] text-[color:var(--text-soft)]">
+                Insert
+              </span>
+              <IconActionButton
+                type="button"
+                onClick={() =>
+                  insertInlineBlock(() =>
+                    createProtocolBlock(protocolOptions[0]?.id ?? ""),
+                  )
+                }
+                label="Insert protocol"
+                disabled={!interactiveReady || previewVisible}
+              >
+                <ProtocolBlockIcon className="h-4 w-4" />
+              </IconActionButton>
+              <IconActionButton
+                type="button"
+                onClick={() =>
+                  insertInlineBlock(() =>
+                    createEntityBlock(entityOptions[0]?.id ?? ""),
+                  )
+                }
+                label="Insert entity"
+                disabled={!interactiveReady || previewVisible}
+              >
+                <EntityBlockIcon className="h-4 w-4" />
+              </IconActionButton>
+              <IconActionButton
+                type="button"
+                onClick={() => insertInlineBlock(() => createTableBlock())}
+                label="Insert table"
+                disabled={!interactiveReady || previewVisible}
+              >
+                <TableBlockIcon className="h-4 w-4" />
+              </IconActionButton>
+              <p className="ml-auto max-w-xl text-right text-sm leading-6 text-[color:var(--text-muted)]">
+                Tables, linked entities, and reusable protocols now sit inside
+                the document flow instead of living in a separate lane below it.
+              </p>
+            </div>
+
+            <MarkdownToolbar
+              onApply={applyMarkdownCommand}
+              previewVisible={previewVisible}
+              onTogglePreview={togglePreview}
+              disabled={previewVisible || !activeTextBlock}
+            />
           </div>
         </section>
 
-        <div className="divide-y divide-[color:var(--line)]">
+        <section className="space-y-6">
           {blocks.map((block, index) => {
-            const canMoveUp = index > 0;
-            const canMoveDown = index < blocks.length - 1;
-            const previewVisible =
-              block.type === "text" ? Boolean(previewByBlockId[block.id]) : false;
+            if (block.type === "text") {
+              const primaryTextBlock = index === 0;
+              const ariaLabel = primaryTextBlock
+                ? "Entry document body"
+                : `Entry document body section ${index + 1}`;
+
+              return previewVisible ? (
+                <div
+                  key={block.id}
+                  className="py-1 text-sm leading-8 text-[color:var(--text-primary)]"
+                >
+                  {block.content.trim() ? (
+                    <MarkdownPreview value={block.content} />
+                  ) : (
+                    <p className="italic text-[color:var(--text-soft)]">
+                      {primaryTextBlock
+                        ? "Start writing your experimental rationale, setup, observations, or next steps."
+                        : "Continue the entry around this embedded block."}
+                    </p>
+                  )}
+                </div>
+              ) : (
+                <textarea
+                  key={block.id}
+                  ref={(node) => {
+                    textBlockRefs.current[block.id] = node;
+                  }}
+                  value={block.content}
+                  onChange={(event) => updateTextBlock(block.id, event.target.value)}
+                  onFocus={() => {
+                    setActiveTextBlockId(block.id);
+                    rememberSelection(block.id);
+                  }}
+                  onClick={() => rememberSelection(block.id)}
+                  onKeyUp={() => rememberSelection(block.id)}
+                  onSelect={() => rememberSelection(block.id)}
+                  rows={Math.max(primaryTextBlock ? 10 : 4, lineCount(block.content) + 1)}
+                  aria-label={ariaLabel}
+                  spellCheck={false}
+                  className="block w-full resize-none border-0 bg-transparent px-0 py-1 text-sm leading-8 text-[color:var(--text-primary)] outline-none placeholder:text-[color:var(--text-soft)]"
+                  placeholder={
+                    primaryTextBlock
+                      ? "Start writing your experimental rationale, setup, observations, or next steps."
+                      : "Continue the entry here."
+                  }
+                />
+              );
+            }
+
+            if (block.type === "table") {
+              return (
+                <TableBlockEditor
+                  key={block.id}
+                  block={block}
+                  tableNumber={tableNumberById.get(block.id) ?? 1}
+                  onRemove={() => removeEmbedBlock(block.id)}
+                  onChange={(nextBlock) => updateEmbedBlock(block.id, nextBlock)}
+                />
+              );
+            }
+
+            if (block.type === "entity") {
+              return (
+                <EmbedBlockShell
+                  key={block.id}
+                  block={block}
+                  onRemove={() => removeEmbedBlock(block.id)}
+                >
+                  <EntityBlockEditor
+                    block={block}
+                    entityNumber={entityNumberById.get(block.id) ?? 1}
+                    entityOptions={entityOptions}
+                    onChange={(nextBlock) => updateEmbedBlock(block.id, nextBlock)}
+                  />
+                </EmbedBlockShell>
+              );
+            }
 
             return (
-              <section
+              <EmbedBlockShell
                 key={block.id}
-                className="grid gap-5 py-6 lg:grid-cols-[156px_minmax(0,1fr)_auto]"
+                block={block}
+                onRemove={() => removeEmbedBlock(block.id)}
               >
-                <div className="space-y-2">
-                  <p className="text-[11px] uppercase tracking-[0.22em] text-[color:var(--text-soft)]">
-                    {block.type === "text"
-                      ? "Markdown"
-                      : block.type === "table"
-                        ? "Table"
-                        : "Protocol"}
-                  </p>
-                  <div className="border-l border-[color:var(--line)] pl-3 text-xs leading-6 text-[color:var(--text-muted)]">
-                    {block.type === "text"
-                      ? "Narrative notes, observations, and headings."
-                      : block.type === "table"
-                        ? "Structured measurements and reagent layouts."
-                        : "Reusable protocol references from the library."}
-                  </div>
-                </div>
-
-                <div className="space-y-4">
-                  {block.type === "text" ? (
-                    <>
-                      <MarkdownToolbar
-                        blockId={block.id}
-                        onApply={applyMarkdownCommand}
-                        previewVisible={previewVisible}
-                        onTogglePreview={togglePreview}
-                      />
-                      <textarea
-                        ref={(node) => {
-                          textareaRefs.current[block.id] = node;
-                        }}
-                        value={block.content}
-                        onChange={(event) =>
-                          updateBlock(index, {
-                            ...block,
-                            content: event.target.value,
-                          })
-                        }
-                      rows={previewVisible ? 10 : 14}
-                      aria-label={`Markdown block ${index + 1}`}
-                      className="block min-h-[320px] w-full border-t border-[color:var(--line)] bg-transparent px-0 py-4 text-sm leading-8 text-[color:var(--text-primary)] outline-none placeholder:text-[color:var(--text-soft)]"
-                      placeholder="Start writing your experimental rationale, setup, observations, or next steps."
-                    />
-                      {previewVisible ? (
-                        <div className="border-t border-[color:var(--line)] pt-4">
-                          <p className="mb-3 text-[11px] uppercase tracking-[0.22em] text-[color:var(--text-soft)]">
-                            Preview
-                          </p>
-                          <MarkdownPreview value={block.content} />
-                        </div>
-                      ) : null}
-                    </>
-                  ) : null}
-
-                  {block.type === "protocol" ? (
-                    <div className="space-y-3">
-                      <label className="block space-y-2">
-                        <span className="text-[11px] uppercase tracking-[0.22em] text-[color:var(--text-soft)]">
-                          Linked protocol
-                        </span>
-                        <select
-                          value={block.protocolId}
-                          onChange={(event) =>
-                            updateBlock(index, {
-                              ...block,
-                              protocolId: event.target.value,
-                            })
-                          }
-                          aria-label={`Protocol block ${index + 1}`}
-                          className="w-full border-b border-[color:var(--line)] bg-transparent px-0 py-2 text-sm text-[color:var(--text-primary)] outline-none focus:border-[color:var(--accent-strong)]"
-                        >
-                          <option value="">Select a protocol</option>
-                          {protocolOptions.map((protocol) => (
-                            <option key={protocol.id} value={protocol.id}>
-                              {protocol.title}
-                            </option>
-                          ))}
-                        </select>
-                      </label>
-                      <div className="text-sm leading-7 text-[color:var(--text-muted)]">
-                        {block.protocolId ? (
-                          protocolOptions.find(
-                            (protocol) => protocol.id === block.protocolId,
-                          )?.summary ?? "Reusable protocol inserted into this entry."
-                        ) : (
-                          <span className="text-[color:var(--text-soft)]">
-                            Select a protocol to insert a reusable method block.
-                          </span>
-                        )}
-                      </div>
-                    </div>
-                  ) : null}
-
-                  {block.type === "table" ? (
-                    <TableBlockEditor
-                      block={block}
-                      blockIndex={index}
-                      onChange={(nextBlock) => updateBlock(index, nextBlock)}
-                    />
-                  ) : null}
-                </div>
-
-                <div className="flex items-start gap-2 lg:justify-end">
-                  <button
-                    type="button"
-                    onClick={() => moveUp(index)}
-                    disabled={!canMoveUp}
-                    aria-label="Move block up"
-                    title="Move block up"
-                    className="inline-flex h-9 w-9 items-center justify-center border border-[color:var(--line)] text-[color:var(--text-muted)] transition hover:border-[color:var(--line-strong)] hover:text-[color:var(--text-primary)] disabled:opacity-40"
-                  >
-                    <ChevronUpIcon className="h-4 w-4" />
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => moveDown(index)}
-                    disabled={!canMoveDown}
-                    aria-label="Move block down"
-                    title="Move block down"
-                    className="inline-flex h-9 w-9 items-center justify-center border border-[color:var(--line)] text-[color:var(--text-muted)] transition hover:border-[color:var(--line-strong)] hover:text-[color:var(--text-primary)] disabled:opacity-40"
-                  >
-                    <ChevronDownIcon className="h-4 w-4" />
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => removeBlock(index)}
-                    disabled={blocks.length <= 1}
-                    aria-label="Remove block"
-                    title="Remove block"
-                    className="inline-flex h-9 w-9 items-center justify-center border border-[color:var(--line)] text-[color:var(--text-muted)] transition hover:border-[color:var(--danger-soft)] hover:text-[color:var(--danger)] disabled:opacity-40"
-                  >
-                    <TrashIcon className="h-4 w-4" />
-                  </button>
-                </div>
-              </section>
+                <ProtocolBlockEditor
+                  block={block}
+                  protocolNumber={protocolNumberById.get(block.id) ?? 1}
+                  protocolOptions={protocolOptions}
+                  onChange={(nextBlock) => updateEmbedBlock(block.id, nextBlock)}
+                />
+              </EmbedBlockShell>
             );
           })}
-        </div>
+        </section>
 
         <div className="border-t border-[color:var(--line)] pt-5">
           <SubmitButton
             idleLabel={submitLabel}
             pendingLabel={pendingLabel}
-            className="inline-flex items-center border border-[color:var(--accent-soft)] bg-[color:var(--accent-muted)] px-4 py-3 text-sm font-medium text-[color:var(--text-primary)] transition hover:border-[color:var(--accent-strong)] hover:bg-[color:var(--accent-soft)] disabled:cursor-not-allowed disabled:opacity-60"
+            className={primaryButtonStyles}
           />
         </div>
       </div>
