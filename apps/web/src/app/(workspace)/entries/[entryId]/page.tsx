@@ -2,6 +2,7 @@ import Link from "next/link";
 import {
   formatEntryIdentifier,
   getEntryDetailForUser,
+  getWorkspaceSnapshotForUser,
   listProtocolsForUser,
   type EntryBlock,
 } from "@biota/db";
@@ -9,13 +10,16 @@ import { notFound } from "next/navigation";
 import { EntryEditor, type EntryEditorBlock } from "@/components/notebook/editor";
 import type { ProtocolOption } from "@/components/notebook/editor";
 import { listStoredSequenceEntityOptions } from "@/lib/entities/store";
-import { isDemoAuthMode } from "@/lib/auth/demo.server";
+import {
+  getDemoWorkspaceSnapshot,
+  isDemoAuthMode,
+} from "@/lib/auth/demo.server";
 import { requireServerSession } from "@/lib/auth/session";
+import { WorkspaceActions } from "@/components/workspace-actions";
 import {
   getDemoEntryDetail,
   listDemoProtocols,
 } from "@/lib/notebook/demo-store";
-import { updateEntryDraftAction } from "@/lib/notebook/actions";
 
 const entryDetailDateFormatter = new Intl.DateTimeFormat("en-US", {
   month: "short",
@@ -84,11 +88,17 @@ export default async function EntryDetailPage({
 }: EntryDetailPageProps) {
   const session = await requireServerSession();
   const { entryId } = await params;
-  const [entry, protocols] = isDemoAuthMode()
-    ? await Promise.all([getDemoEntryDetail(entryId), listDemoProtocols()])
+  const demoMode = isDemoAuthMode();
+  const [entry, protocols, workspaceSnapshot] = demoMode
+    ? await Promise.all([
+        getDemoEntryDetail(entryId),
+        listDemoProtocols(),
+        Promise.resolve(getDemoWorkspaceSnapshot()),
+      ])
     : await Promise.all([
         getEntryDetailForUser(session.user.id, entryId),
         listProtocolsForUser(session.user.id),
+        getWorkspaceSnapshotForUser(session.user.id),
       ]);
 
   if (!entry) {
@@ -107,31 +117,11 @@ export default async function EntryDetailPage({
   const metadataTabId = `${detailsTabName}-metadata`;
   const protocolsTabId = `${detailsTabName}-protocols`;
   const entryIdentifier = formatEntryIdentifier(entry.id);
+  const workspaceLabel =
+    workspaceSnapshot?.personalWorkspace?.name ?? "Personal workspace";
 
   return (
-    <section className="space-y-4">
-      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[color:var(--line)] pb-3 text-[11px] uppercase tracking-[0.18em] text-[color:var(--text-soft)]">
-        <div className="flex flex-wrap items-center gap-2">
-          <Link
-            href="/entries"
-            className="transition hover:text-[color:var(--text-primary)]"
-          >
-            Entries
-          </Link>
-          <span className="text-[color:var(--line-strong)]">/</span>
-          <span className="text-[color:var(--text-primary)]">{entry.title}</span>
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <span className="border border-[color:var(--line)] px-2 py-1">{entry.status}</span>
-          <span className="border border-[color:var(--line)] px-2 py-1">
-            {entryIdentifier}
-          </span>
-          <span className="border border-[color:var(--accent-soft)] bg-[color:var(--accent-muted)] px-2 py-1 text-[color:var(--text-primary)]">
-            v{entry.latestVersionNumber}
-          </span>
-        </div>
-      </div>
-
+    <section className="space-y-1">
       <input
         id={documentTabId}
         name={detailsTabName}
@@ -151,45 +141,55 @@ export default async function EntryDetailPage({
         type="radio"
         className="peer/protocols sr-only"
       />
+      <style>
+        {`
+          input[id="${documentTabId}"]:checked ~ .entry-detail-tab-strip label[for="${documentTabId}"],
+          input[id="${metadataTabId}"]:checked ~ .entry-detail-tab-strip label[for="${metadataTabId}"],
+          input[id="${protocolsTabId}"]:checked ~ .entry-detail-tab-strip label[for="${protocolsTabId}"] {
+            border-bottom-color: var(--text-primary);
+            color: var(--text-primary);
+            font-weight: 600;
+          }
+        `}
+      </style>
 
-      <div className="flex flex-wrap items-center gap-2 border-b border-[color:var(--line)] pb-3 text-[11px] uppercase tracking-[0.18em] text-[color:var(--text-soft)]">
+      <div className="entry-detail-tab-strip flex h-7 min-w-0 flex-nowrap items-end gap-6 overflow-hidden border-x border-y border-[color:var(--line)] bg-[color:var(--document-surface)] px-6 text-sm text-[color:var(--text-muted)] lg:px-10">
         <label
           htmlFor={documentTabId}
-          className="cursor-pointer border border-[color:var(--line)] px-3 py-2 transition hover:text-[color:var(--text-primary)] peer-checked/document:border-[color:var(--accent-soft)] peer-checked/document:bg-[color:var(--accent-muted)] peer-checked/document:text-[color:var(--text-primary)]"
+          className="-mb-px inline-flex h-7 shrink-0 cursor-pointer items-center border-b-2 border-transparent px-0 transition hover:text-[color:var(--text-primary)]"
         >
           Document
         </label>
         <label
           htmlFor={metadataTabId}
-          className="cursor-pointer border border-[color:var(--line)] px-3 py-2 transition hover:text-[color:var(--text-primary)] peer-checked/metadata:border-[color:var(--accent-soft)] peer-checked/metadata:bg-[color:var(--accent-muted)] peer-checked/metadata:text-[color:var(--text-primary)]"
+          className="-mb-px inline-flex h-7 shrink-0 cursor-pointer items-center border-b-2 border-transparent px-0 transition hover:text-[color:var(--text-primary)]"
         >
           Metadata
         </label>
         <label
           htmlFor={protocolsTabId}
-          className="cursor-pointer border border-[color:var(--line)] px-3 py-2 transition hover:text-[color:var(--text-primary)] peer-checked/protocols:border-[color:var(--accent-soft)] peer-checked/protocols:bg-[color:var(--accent-muted)] peer-checked/protocols:text-[color:var(--text-primary)]"
+          className="-mb-px inline-flex h-7 shrink-0 cursor-pointer items-center border-b-2 border-transparent px-0 transition hover:text-[color:var(--text-primary)]"
         >
           Protocols
         </label>
+        <WorkspaceActions workspaceLabel={workspaceLabel} />
       </div>
 
       <section className="hidden peer-checked/document:block">
-        <article className="min-h-[calc(100vh-13rem)] border-x border-[color:var(--line)] bg-[color:var(--document-surface)] px-6 py-6 lg:px-10 lg:py-8">
+        <article className="min-h-[calc(100vh-8rem)] border-x border-[color:var(--line)] bg-[color:var(--document-surface)] px-6 py-4 lg:px-10 lg:py-5">
           <EntryEditor
             entryId={entry.id}
             initialTitle={entry.title}
             initialBlocks={toEditorBlocks(entry.blocks)}
             protocolOptions={protocolOptions}
             entityOptions={entityOptions}
-            formAction={updateEntryDraftAction}
-            submitLabel="Save entry version"
-            pendingLabel="Saving version..."
+            autosaveUrl={`/api/entries/${entry.id}/autosave`}
             className="space-y-0"
           />
         </article>
       </section>
 
-      <section className="hidden border-x border-[color:var(--line)] px-6 py-6 peer-checked/metadata:block lg:px-10 lg:py-8">
+      <section className="hidden min-h-[calc(100vh-8rem)] border-x border-[color:var(--line)] bg-[color:var(--document-surface)] px-6 py-4 peer-checked/metadata:block lg:px-10 lg:py-5">
         <div className="max-w-2xl space-y-6">
           <div>
             <p className="font-mono text-[11px] uppercase tracking-[0.18em] text-[color:var(--text-soft)]">
@@ -261,7 +261,7 @@ export default async function EntryDetailPage({
         </div>
       </section>
 
-      <section className="hidden border-x border-[color:var(--line)] px-6 py-6 peer-checked/protocols:block lg:px-10 lg:py-8">
+      <section className="hidden min-h-[calc(100vh-8rem)] border-x border-[color:var(--line)] bg-[color:var(--document-surface)] px-6 py-4 peer-checked/protocols:block lg:px-10 lg:py-5">
         <div className="max-w-3xl space-y-5">
           <div>
             <p className="font-mono text-[11px] uppercase tracking-[0.18em] text-[color:var(--text-soft)]">

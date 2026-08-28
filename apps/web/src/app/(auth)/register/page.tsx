@@ -74,11 +74,11 @@ export default async function RegisterPage({
             required
           />
 
-          <label className="flex items-start gap-3 rounded-2xl border border-white/10 bg-white/5 p-4 text-sm text-slate-300">
+          <label className="flex items-start gap-3 rounded-[12px] border border-[color:var(--line)] bg-[color:var(--surface-muted)] p-4 text-sm text-[color:var(--text-muted)]">
             <input
               type="checkbox"
               name="terms"
-              className="mt-1 h-4 w-4 rounded border-white/20 bg-slate-950/70 text-emerald-400 focus:ring-emerald-400/20"
+              className="mt-1 h-4 w-4 rounded border-[color:var(--line)] bg-[color:var(--surface-strong)] text-[color:var(--accent-strong)] focus:ring-[color:var(--accent-muted)]"
               required
             />
             <span>
@@ -89,7 +89,7 @@ export default async function RegisterPage({
           </label>
 
           {error ? (
-            <p className="rounded-2xl border border-rose-400/20 bg-rose-400/10 px-4 py-3 text-sm text-rose-100">
+            <p className="rounded-[12px] border border-[color:var(--danger-soft)] bg-[color:var(--danger-soft)] px-4 py-3 text-sm text-[color:var(--text-primary)]">
               {error}
             </p>
           ) : null}

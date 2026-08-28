@@ -2,12 +2,12 @@
 
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { signOut } from "next-auth/react";
 import {
   useEffect,
   useMemo,
   useState,
   useSyncExternalStore,
+  type MouseEvent,
   type ReactNode,
   type SVGProps,
 } from "react";
@@ -28,6 +28,14 @@ type CreateRecordTarget = {
   scope: "root" | "folder";
   folderId?: string;
   folderName?: string;
+};
+
+type EntryContextMenuTarget = {
+  entryId: string;
+  href: string;
+  title: string;
+  x: number;
+  y: number;
 };
 
 const navigatorCollapsedStorageKey = "biota-navigator-collapsed";
@@ -165,6 +173,19 @@ function GraphIcon(props: IconProps) {
   );
 }
 
+function PlanningIcon(props: IconProps) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" {...props}>
+      <path d="M5 5.75h14v13.5H5z" />
+      <path d="M5 9.25h14" />
+      <path d="M8.25 4v3.5" />
+      <path d="M15.75 4v3.5" />
+      <path d="M8 12.5h3.75" />
+      <path d="M8 15.75h6.5" />
+    </svg>
+  );
+}
+
 function SettingsIcon(props: IconProps) {
   return (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" {...props}>
@@ -250,6 +271,7 @@ const primaryNav = [
   { label: "Projects", href: "/entries", Icon: NotebookIcon },
   { label: "Stats", href: "/stats", Icon: StatsIcon },
   { label: "Graph", href: "/graph", Icon: GraphIcon },
+  { label: "Planning", href: "/planning", Icon: PlanningIcon },
 ];
 
 function isProjectPath(pathname: string) {
@@ -286,6 +308,10 @@ function titleFromPath(pathname: string) {
 
   if (pathname === "/stats") {
     return "Stats";
+  }
+
+  if (pathname === "/planning" || pathname.startsWith("/planning/")) {
+    return "Planning";
   }
 
   if (pathname.startsWith("/entries/")) {
@@ -371,24 +397,103 @@ function collectNavigatorRecordMap(
   return recordMap;
 }
 
+function normalizeNavigatorSearch(value: string) {
+  return value.trim().toLowerCase();
+}
+
+function getNavigatorRecordSearchText(record: NotebookNavigatorRecord) {
+  const badge =
+    record.kind === "entry"
+      ? `v${record.latestVersionNumber}`
+      : record.entityTypeLabel;
+
+  return [
+    record.title,
+    record.slug,
+    record.kind,
+    badge,
+  ].join(" ").toLowerCase();
+}
+
+function filterNavigatorFolder(
+  folder: NotebookNavigatorFolder,
+  query: string,
+): NotebookNavigatorFolder | null {
+  const folderMatches = [folder.name, folder.slug]
+    .join(" ")
+    .toLowerCase()
+    .includes(query);
+
+  if (folderMatches) {
+    return folder;
+  }
+
+  const records = folder.records.filter((record) =>
+    getNavigatorRecordSearchText(record).includes(query),
+  );
+  const childFolders = folder.childFolders.flatMap((childFolder) => {
+    const filteredFolder = filterNavigatorFolder(childFolder, query);
+
+    return filteredFolder ? [filteredFolder] : [];
+  });
+
+  if (!records.length && !childFolders.length) {
+    return null;
+  }
+
+  return {
+    ...folder,
+    records,
+    childFolders,
+  };
+}
+
+function filterNavigatorData(
+  navigator: NotebookNavigatorData | null,
+  query: string,
+): NotebookNavigatorData | null {
+  if (!navigator || !query) {
+    return navigator;
+  }
+
+  return {
+    ...navigator,
+    folders: navigator.folders.flatMap((folder) => {
+      const filteredFolder = filterNavigatorFolder(folder, query);
+
+      return filteredFolder ? [filteredFolder] : [];
+    }),
+    unfiledRecords: navigator.unfiledRecords.filter((record) =>
+      getNavigatorRecordSearchText(record).includes(query),
+    ),
+  };
+}
+
 function NavigatorFolderTree({
   folder,
   pathname,
   depth,
+  searchActive,
   openByFolderId,
   onToggle,
   createTarget,
   onCreate,
+  onOpenEntryMenu,
 }: {
   folder: NotebookNavigatorFolder;
   pathname: string;
   depth: number;
+  searchActive: boolean;
   openByFolderId: Record<string, boolean>;
   onToggle: (folderId: string) => void;
   createTarget: CreateRecordTarget | null;
   onCreate: (target: CreateRecordTarget) => void;
+  onOpenEntryMenu: (
+    event: MouseEvent<HTMLAnchorElement>,
+    record: NotebookNavigatorRecord,
+  ) => void;
 }) {
-  const isOpen = openByFolderId[folder.id] ?? true;
+  const isOpen = searchActive || (openByFolderId[folder.id] ?? true);
   const hasChildren = folder.childFolders.length > 0 || folder.records.length > 0;
   const isCreateMenuOpen =
     createTarget?.scope === "folder" && createTarget.folderId === folder.id;
@@ -450,6 +555,7 @@ function NavigatorFolderTree({
               <Link
                 key={`${record.kind}-${record.id}`}
                 href={record.href}
+                onContextMenu={(event) => onOpenEntryMenu(event, record)}
                 className={`flex items-center gap-2 px-2 py-1.5 text-sm transition ${
                   active
                     ? "bg-[color:var(--accent-muted)] text-[color:var(--text-primary)]"
@@ -472,10 +578,12 @@ function NavigatorFolderTree({
             folder={childFolder}
             pathname={pathname}
             depth={depth + 1}
+            searchActive={searchActive}
             openByFolderId={openByFolderId}
             onToggle={onToggle}
             createTarget={createTarget}
             onCreate={onCreate}
+            onOpenEntryMenu={onOpenEntryMenu}
           />
         ))}
       </div>
@@ -488,7 +596,6 @@ type AppShellProps = {
   children: ReactNode;
   viewerName?: string;
   viewerEmail?: string;
-  workspaceLabel?: string;
   navigator?: NotebookNavigatorData | null;
 };
 
@@ -499,6 +606,7 @@ function WorkspaceTabButton({
   onClose,
   closeLabel,
   title,
+  compact,
 }: {
   active?: boolean;
   children: ReactNode;
@@ -506,20 +614,23 @@ function WorkspaceTabButton({
   onClose?: () => void;
   closeLabel?: string;
   title?: string;
+  compact?: boolean;
 }) {
   return (
     <div
-      className={`group inline-flex items-stretch border text-sm transition ${
+      className={`group inline-flex shrink-0 items-stretch border transition ${
         active
           ? "border-[color:var(--accent-soft)] bg-[color:var(--accent-muted)] text-[color:var(--text-primary)]"
           : "border-[color:var(--line)] bg-[color:var(--surface-muted)] text-[color:var(--text-muted)] hover:border-[color:var(--line-strong)] hover:text-[color:var(--text-primary)]"
-      }`}
+      } ${compact ? "text-xs" : "text-sm"}`}
       title={title}
     >
       <button
         type="button"
         onClick={onClick}
-        className="flex min-w-0 items-center gap-2 px-3 py-2 text-left"
+        className={`flex min-w-0 items-center gap-2 text-left ${
+          compact ? "px-2 py-1" : "px-3 py-2"
+        }`}
       >
         {children}
       </button>
@@ -528,7 +639,9 @@ function WorkspaceTabButton({
           type="button"
           onClick={onClose}
           aria-label={closeLabel}
-          className="border-l border-[color:var(--line)] px-2.5 text-[11px] text-[color:var(--text-soft)] transition hover:bg-[color:var(--surface)] hover:text-[color:var(--text-primary)]"
+          className={`border-l border-[color:var(--line)] text-[11px] text-[color:var(--text-soft)] transition hover:bg-[color:var(--surface)] hover:text-[color:var(--text-primary)] ${
+            compact ? "px-1.5" : "px-2.5"
+          }`}
         >
           ×
         </button>
@@ -596,19 +709,21 @@ export function AppShell({
   children,
   viewerName = "Biota user",
   viewerEmail = "",
-  workspaceLabel = "Personal workspace",
   navigator = null,
 }: AppShellProps) {
   const pathname = usePathname();
   const router = useRouter();
   const searchParams = useSearchParams();
-  const demoMode = process.env.NEXT_PUBLIC_BIOTA_DEMO_MODE === "true";
   const activeWorkspaceTab = getWorkspaceTabFromPath(pathname);
   const isEntryDetailRoute = activeWorkspaceTab?.kind === "entry";
   const isEntityDetailRoute = activeWorkspaceTab?.kind === "entity";
   const isSettingsOverlayRoute = pathname === "/settings";
+  const isPlanningRoute = pathname === "/planning" || pathname.startsWith("/planning/");
   const showInspector =
-    !isEntryDetailRoute && !isEntityDetailRoute && !isSettingsOverlayRoute;
+    !isEntryDetailRoute &&
+    !isEntityDetailRoute &&
+    !isSettingsOverlayRoute &&
+    !isPlanningRoute;
   const recordMap = useMemo(() => collectNavigatorRecordMap(navigator), [navigator]);
   const settingsReturnPath = useMemo(() => {
     const from = searchParams.get("from");
@@ -633,6 +748,7 @@ export function AppShell({
     readNavigatorCollapsedSnapshot,
     () => Boolean(isEntryDetailRoute || isEntityDetailRoute),
   );
+  const showNavigatorPane = !navigatorCollapsed && !isPlanningRoute;
   const storedWorkspaceTabsSnapshot = useSyncExternalStore(
     subscribeToWorkspaceStorage,
     readWorkspaceTabsSnapshot,
@@ -656,6 +772,20 @@ export function AppShell({
     () => collectFolderState(navigator?.folders ?? []),
   );
   const [createMenuTarget, setCreateMenuTarget] = useState<CreateRecordTarget | null>(null);
+  const [entryContextMenu, setEntryContextMenu] =
+    useState<EntryContextMenuTarget | null>(null);
+  const [deletingEntryId, setDeletingEntryId] = useState<string | null>(null);
+  const [entryActionError, setEntryActionError] = useState("");
+  const [navigatorSearchQuery, setNavigatorSearchQuery] = useState("");
+  const normalizedNavigatorSearchQuery = normalizeNavigatorSearch(navigatorSearchQuery);
+  const filteredNavigator = useMemo(
+    () => filterNavigatorData(navigator, normalizedNavigatorSearchQuery),
+    [navigator, normalizedNavigatorSearchQuery],
+  );
+  const navigatorSearchActive = normalizedNavigatorSearchQuery.length > 0;
+  const navigatorHasResults = Boolean(
+    filteredNavigator?.folders.length || filteredNavigator?.unfiledRecords.length,
+  );
 
   useEffect(() => {
     if (!activeWorkspaceTab) {
@@ -678,6 +808,7 @@ export function AppShell({
   useEffect(() => {
     const frame = window.requestAnimationFrame(() => {
       setCreateMenuTarget(null);
+      setEntryContextMenu(null);
     });
 
     return () => {
@@ -713,6 +844,34 @@ export function AppShell({
     };
   }, [createMenuTarget]);
 
+  useEffect(() => {
+    if (!entryContextMenu) {
+      return;
+    }
+
+    function handlePointerDown(event: PointerEvent) {
+      if (event.target instanceof Element) {
+        if (!event.target.closest("[data-entry-context-menu-root]")) {
+          setEntryContextMenu(null);
+        }
+      }
+    }
+
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        setEntryContextMenu(null);
+      }
+    }
+
+    window.addEventListener("pointerdown", handlePointerDown);
+    window.addEventListener("keydown", handleKeyDown);
+
+    return () => {
+      window.removeEventListener("pointerdown", handlePointerDown);
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [entryContextMenu]);
+
   const workspaceTabs = useMemo(() => {
     const tabs = openWorkspaceTabs.map((tab) => {
       const record = recordMap.get(workspaceTabKey(tab));
@@ -742,17 +901,83 @@ export function AppShell({
         currentTabs.findIndex((candidate) => candidate.key === tab.key) === index,
     );
   }, [openWorkspaceTabs, pathname, recordMap]);
+  const mainClassName = isEntryDetailRoute
+    ? "min-w-0 px-2 py-2 lg:px-4"
+    : isEntityDetailRoute
+      ? "min-w-0 px-4 py-6 lg:px-8"
+      : "min-w-0 px-5 py-5 lg:px-7";
+  const workspaceHeaderClassName = isEntryDetailRoute
+    ? "mb-1 border-b border-[color:var(--line)] pb-1"
+    : "mb-5 space-y-3 border-b border-[color:var(--line)] pb-4";
 
-  async function handleSignOut() {
-    if (demoMode) {
-      await fetch("/api/demo-logout", {
-        method: "POST",
-      });
-      window.location.assign("/sign-in?demo=1");
+  function openEntryContextMenu(
+    event: MouseEvent<HTMLAnchorElement>,
+    record: NotebookNavigatorRecord,
+  ) {
+    if (record.kind !== "entry") {
       return;
     }
 
-    await signOut({ callbackUrl: "/sign-in" });
+    event.preventDefault();
+    setCreateMenuTarget(null);
+    setEntryActionError("");
+
+    const menuWidth = 180;
+    const menuHeight = 48;
+    const viewportPadding = 8;
+    const x = Math.min(
+      event.clientX,
+      window.innerWidth - menuWidth - viewportPadding,
+    );
+    const y = Math.min(
+      event.clientY,
+      window.innerHeight - menuHeight - viewportPadding,
+    );
+
+    setEntryContextMenu({
+      entryId: record.id,
+      href: record.href,
+      title: record.title,
+      x: Math.max(viewportPadding, x),
+      y: Math.max(viewportPadding, y),
+    });
+  }
+
+  async function deleteEntryFromNavigator(target: EntryContextMenuTarget) {
+    setDeletingEntryId(target.entryId);
+    setEntryActionError("");
+
+    try {
+      const deletingCurrentEntry =
+        window.location.pathname === target.href || pathname === target.href;
+      const response = await fetch(`/api/entries/${encodeURIComponent(target.entryId)}`, {
+        method: "DELETE",
+      });
+
+      if (!response.ok) {
+        throw new Error("Entry delete failed.");
+      }
+
+      writeWorkspaceTabsSnapshot(
+        openWorkspaceTabs.filter(
+          (tab) => workspaceTabKey(tab) !== `entry:${target.entryId}`,
+        ),
+      );
+      setEntryContextMenu(null);
+
+      if (deletingCurrentEntry) {
+        router.push("/entries");
+        window.setTimeout(() => {
+          router.refresh();
+        }, 0);
+      } else {
+        router.refresh();
+      }
+    } catch {
+      setEntryActionError("Could not delete entry.");
+    } finally {
+      setDeletingEntryId(null);
+    }
   }
 
   function closeWorkspaceTab(tabToClose: WorkspaceTabSnapshot) {
@@ -805,60 +1030,12 @@ export function AppShell({
 
   return (
     <div className="relative min-h-screen bg-[color:var(--bg)] text-[color:var(--text-primary)]">
-      <header className="sticky top-0 z-20 border-b border-[color:var(--line)] bg-[color:var(--surface-strong)] backdrop-blur-xl">
-        <div className="grid h-16 grid-cols-[auto_minmax(0,1fr)_auto] items-stretch px-4 lg:px-6">
-          <div className="flex items-center gap-3 pr-4">
-            <div className="flex h-9 w-9 items-center justify-center border border-[color:var(--accent-soft)] bg-[color:var(--accent-muted)] text-sm font-semibold text-[color:var(--text-primary)]">
-              B
-            </div>
-            <div className="leading-tight">
-              <p className="text-sm font-semibold tracking-[0.06em] text-[color:var(--text-primary)]">
-                Biota ELN
-              </p>
-              <p className="font-mono text-[11px] uppercase tracking-[0.22em] text-[color:var(--text-soft)]">
-                Lab notebook shell
-              </p>
-            </div>
-          </div>
-
-          <div className="hidden items-center border-x border-[color:var(--line)] px-4 md:flex">
-            <div className="flex w-full items-center gap-3 text-sm text-[color:var(--text-muted)]">
-              <span className="font-mono text-[color:var(--text-soft)]">⌘K</span>
-              <span>Search workspace records, sequences, methods, and linked relations</span>
-            </div>
-          </div>
-
-          <div className="flex items-center gap-2 pl-4">
-            <Link
-              href={`/settings?from=${encodeURIComponent(currentLocation)}`}
-              aria-label="Settings"
-              title="Settings"
-              className="inline-flex h-9 w-9 items-center justify-center border border-[color:var(--line)] text-[color:var(--text-muted)] transition hover:border-[color:var(--line-strong)] hover:text-[color:var(--text-primary)]"
-            >
-              <SettingsIcon className="h-4 w-4" />
-            </Link>
-            <div className="hidden min-h-9 items-center border border-[color:var(--line)] px-3 text-sm text-[color:var(--text-muted)] lg:flex">
-              {workspaceLabel}
-            </div>
-            <button
-              type="button"
-              onClick={() => {
-                void handleSignOut();
-              }}
-              className="inline-flex min-h-9 items-center border border-[color:var(--line)] px-3 text-sm text-[color:var(--text-muted)] transition hover:border-[color:var(--line-strong)] hover:text-[color:var(--text-primary)]"
-            >
-              Sign out
-            </button>
-          </div>
-        </div>
-      </header>
-
       <div
-        className={`grid min-h-[calc(100vh-4rem)] ${
+        className={`grid min-h-screen ${
           isSettingsOverlayRoute ? "pointer-events-none select-none opacity-35 blur-[2px]" : ""
         }`}
         style={{
-          gridTemplateColumns: navigatorCollapsed
+          gridTemplateColumns: !showNavigatorPane
             ? showInspector
               ? "72px minmax(0,1fr) minmax(260px,320px)"
               : "72px minmax(0,1fr)"
@@ -867,7 +1044,7 @@ export function AppShell({
               : "72px minmax(240px,320px) minmax(0,1fr)",
         }}
       >
-        <aside className="flex flex-col border-r border-[color:var(--line)] bg-[color:var(--surface-muted)] px-2 py-4">
+        <aside className="flex flex-col items-center border-r border-[color:var(--line)] bg-[color:var(--surface-muted)] py-4">
           <div className="space-y-2">
             {primaryNav.map((item) => {
               const active = isActive(pathname, item.href);
@@ -878,7 +1055,7 @@ export function AppShell({
                   key={item.href}
                   type="button"
                   onClick={() => handlePrimaryNavClick(item.href, active)}
-                  className={`group relative flex h-11 items-center justify-center border transition ${
+                  className={`group relative flex h-11 w-11 items-center justify-center border transition ${
                     active
                       ? "border-[color:var(--accent-soft)] bg-[color:var(--accent-muted)] text-[color:var(--text-primary)]"
                       : "border-[color:var(--line)] text-[color:var(--text-muted)] hover:border-[color:var(--line-strong)] hover:text-[color:var(--text-primary)]"
@@ -894,9 +1071,20 @@ export function AppShell({
               );
             })}
           </div>
+          <Link
+            href={`/settings?from=${encodeURIComponent(currentLocation)}`}
+            aria-label="Settings"
+            title="Settings"
+            className="group relative mt-auto flex h-11 w-11 items-center justify-center border border-[color:var(--line)] text-[color:var(--text-muted)] transition hover:border-[color:var(--line-strong)] hover:text-[color:var(--text-primary)]"
+          >
+            <SettingsIcon className="h-5 w-5" />
+            <span className="pointer-events-none absolute left-full top-1/2 z-20 ml-3 -translate-y-1/2 whitespace-nowrap border border-[color:var(--line)] bg-[color:var(--surface-strong)] px-2 py-1 text-[11px] uppercase tracking-[0.16em] text-[color:var(--text-muted)] opacity-0 shadow-lg transition group-hover:opacity-100 group-focus-visible:opacity-100">
+              Settings
+            </span>
+          </Link>
         </aside>
 
-        {!navigatorCollapsed ? (
+        {showNavigatorPane ? (
           <aside className="border-r border-[color:var(--line)] bg-[color:var(--surface)] px-4 py-5">
             <div className="flex items-center justify-between gap-3 border-b border-[color:var(--line)] pb-3">
               <div>
@@ -942,14 +1130,41 @@ export function AppShell({
               </div>
             </div>
 
+            <div className="mt-3">
+              <label htmlFor="navigator-search" className="sr-only">
+                Search navigator
+              </label>
+              <div className="flex min-h-9 items-center border border-[color:var(--line)] bg-[color:var(--surface-strong)] px-2">
+                <input
+                  id="navigator-search"
+                  type="search"
+                  value={navigatorSearchQuery}
+                  onChange={(event) => setNavigatorSearchQuery(event.target.value)}
+                  placeholder="Search navigator"
+                  className="min-w-0 flex-1 bg-transparent text-sm text-[color:var(--text-primary)] outline-none placeholder:text-[color:var(--text-soft)]"
+                />
+                {navigatorSearchQuery ? (
+                  <button
+                    type="button"
+                    onClick={() => setNavigatorSearchQuery("")}
+                    aria-label="Clear navigator search"
+                    className="ml-2 inline-flex h-6 w-6 items-center justify-center text-xs text-[color:var(--text-soft)] transition hover:text-[color:var(--text-primary)]"
+                  >
+                    ×
+                  </button>
+                ) : null}
+              </div>
+            </div>
+
             <div className="mt-4 space-y-1">
-              {navigator?.folders.length ? (
-                navigator.folders.map((folder) => (
+              {filteredNavigator?.folders.length ? (
+                filteredNavigator.folders.map((folder) => (
                   <NavigatorFolderTree
                     key={folder.id}
                     folder={folder}
                     pathname={pathname}
                     depth={0}
+                    searchActive={navigatorSearchActive}
                     openByFolderId={openByFolderId}
                     onToggle={(folderId) => {
                       setOpenByFolderId((current) => ({
@@ -966,21 +1181,24 @@ export function AppShell({
                           : target,
                       );
                     }}
+                    onOpenEntryMenu={openEntryContextMenu}
                   />
                 ))
                 ) : (
-                  <p className="px-2 py-4 text-sm leading-7 text-[color:var(--text-soft)]">
-                    Folders and records will appear here as the workspace grows.
-                  </p>
+                  !navigatorSearchActive ? (
+                    <p className="px-2 py-4 text-sm leading-7 text-[color:var(--text-soft)]">
+                      Folders and records will appear here as the workspace grows.
+                    </p>
+                  ) : null
                 )}
 
-              {navigator?.unfiledRecords.length ? (
+              {filteredNavigator?.unfiledRecords.length ? (
                 <div className="border-t border-[color:var(--line)] pt-3">
                   <p className="px-2 text-[11px] uppercase tracking-[0.18em] text-[color:var(--text-soft)]">
                     Unfiled
                   </p>
                   <div className="mt-2 space-y-0.5">
-                    {navigator.unfiledRecords.map((record) => {
+                    {filteredNavigator.unfiledRecords.map((record) => {
                       const active = pathname === record.href;
                       const Icon = record.kind === "entity" ? EntityIcon : EntryIcon;
                       const badge =
@@ -992,6 +1210,7 @@ export function AppShell({
                         <Link
                           key={`${record.kind}-${record.id}`}
                           href={record.href}
+                          onContextMenu={(event) => openEntryContextMenu(event, record)}
                           className={`flex items-center gap-2 px-2 py-1.5 text-sm transition ${
                             active
                               ? "bg-[color:var(--accent-muted)] text-[color:var(--text-primary)]"
@@ -1009,20 +1228,35 @@ export function AppShell({
                   </div>
                 </div>
               ) : null}
+
+              {navigatorSearchActive && !navigatorHasResults ? (
+                <p className="px-2 py-4 text-sm leading-7 text-[color:var(--text-soft)]">
+                  No navigator matches.
+                </p>
+              ) : null}
+
+              {entryActionError ? (
+                <p role="alert" className="px-2 py-3 text-sm text-[color:var(--danger)]">
+                  {entryActionError}
+                </p>
+              ) : null}
             </div>
           </aside>
         ) : null}
 
-        <main
-          className={`min-w-0 ${isEntryDetailRoute || isEntityDetailRoute ? "px-4 py-6 lg:px-8" : "px-5 py-5 lg:px-7"}`}
-        >
-          <div className="mb-5 space-y-3 border-b border-[color:var(--line)] pb-4">
+        <main className={mainClassName}>
+          <div className={workspaceHeaderClassName}>
             {(pathname.startsWith("/entries") || pathname.startsWith("/entities")) && workspaceTabs.length ? (
-              <div className="flex min-w-0 items-center gap-2 overflow-x-auto pb-1">
+              <div
+                className={`flex min-w-0 flex-nowrap items-center overflow-hidden ${
+                  isEntryDetailRoute ? "gap-1.5 pb-0" : "gap-2 pb-1"
+                }`}
+              >
                 {workspaceTabs.map((tab) => (
                   <WorkspaceTabButton
                     key={tab.key}
                     active={tab.active}
+                    compact={isEntryDetailRoute}
                     onClick={() => router.push(tab.href)}
                     onClose={
                       tab.closable
@@ -1135,6 +1369,35 @@ export function AppShell({
               {children}
             </div>
           </div>
+        </div>
+      ) : null}
+
+      {entryContextMenu ? (
+        <div
+          data-entry-context-menu-root
+          role="menu"
+          aria-label={`Actions for ${entryContextMenu.title}`}
+          className="fixed z-50 min-w-[180px] border border-[color:var(--line)] bg-[color:var(--surface-strong)] p-1 shadow-xl"
+          style={{
+            left: entryContextMenu.x,
+            top: entryContextMenu.y,
+          }}
+        >
+          <button
+            type="button"
+            role="menuitem"
+            disabled={deletingEntryId === entryContextMenu.entryId}
+            onClick={() => {
+              void deleteEntryFromNavigator(entryContextMenu);
+            }}
+            className="flex w-full items-center justify-between gap-4 px-3 py-2 text-left text-sm text-[color:var(--danger)] transition hover:bg-[color:var(--danger-soft)] disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            <span>
+              {deletingEntryId === entryContextMenu.entryId
+                ? "Deleting..."
+                : "Delete entry"}
+            </span>
+          </button>
         </div>
       ) : null}
     </div>

@@ -58,3 +58,58 @@ jobs:
 
       - name: Run smoke tests
         run: npm run test:e2e
+
+  local-first:
+    name: Desktop core and scientific engines
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+
+      - name: Install JavaScript dependencies
+        run: npm ci
+
+      - name: Test vault and sequence packages
+        run: |
+          npm run typecheck --workspace @biota/vault
+          npm run test --workspace @biota/vault
+          npm run typecheck --workspace @biota/bio
+          npm run test --workspace @biota/bio
+
+      - name: Build desktop frontend
+        run: |
+          npm run test --workspace @biota/desktop
+          npm run build --workspace @biota/desktop
+
+      - name: Validate Rust core
+        run: |
+          cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml
+          cargo clippy --all-targets --manifest-path apps/desktop/src-tauri/Cargo.toml -- -D warnings
+          cargo fmt --manifest-path apps/desktop/src-tauri/Cargo.toml -- --check
+
+      - name: Test local analysis engine
+        run: |
+          cd packages/analysis-engine
+          python -m pip install -e ".[dev]"
+          python -m unittest discover -s tests
+
+      - name: Test legacy importer
+        run: node --test scripts/migrate-legacy-vault.test.mjs

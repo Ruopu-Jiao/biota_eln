@@ -11,8 +11,8 @@ const themes: Array<{
   value: ThemeName;
   label: string;
 }> = [
-  { value: "obsidian", label: "Dark" },
   { value: "paper", label: "Light" },
+  { value: "obsidian", label: "Dark" },
   { value: "mist", label: "Mist" },
 ];
 
@@ -50,11 +50,11 @@ function getSnapshot(): ThemeName {
     return domTheme;
   }
 
-  return "obsidian";
+  return "paper";
 }
 
 export function ThemeSwitcher() {
-  const theme = useSyncExternalStore(subscribe, getSnapshot, () => "obsidian");
+  const theme = useSyncExternalStore(subscribe, getSnapshot, () => "paper");
 
   return (
     <div className="flex flex-wrap items-center gap-2 border border-[color:var(--line)] bg-[color:var(--surface-muted)] p-2">

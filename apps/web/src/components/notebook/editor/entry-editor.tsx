@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import {
+  useCallback,
   useEffect,
   useMemo,
   useRef,
@@ -12,7 +13,6 @@ import {
   type ReactNode,
   type SVGProps,
 } from "react";
-import { SubmitButton } from "@/components/notebook/submit-button";
 import { MarkdownPreview } from "./markdown-preview";
 import { createTableFormulaResolver } from "./table-formulas";
 import type {
@@ -43,10 +43,8 @@ type EntryEditorProps = {
   protocolOptions: ProtocolOption[];
   entityOptions: EntityOption[];
   className?: string;
-  formAction?: (formData: FormData) => void | Promise<void>;
+  autosaveUrl?: string;
   onChange?: (blocks: EntryEditorBlock[]) => void;
-  submitLabel?: string;
-  pendingLabel?: string;
 };
 
 type MarkdownCommand =
@@ -72,6 +70,8 @@ type PendingFocusTarget = {
   blockId: string;
   position: number;
 };
+
+type AutosaveStatus = "idle" | "dirty" | "saving" | "saved" | "error";
 
 type TableContextMenu =
   | {
@@ -362,11 +362,9 @@ function lineCount(value: string) {
 }
 
 const iconButtonStyles =
-  "inline-flex h-9 w-9 items-center justify-center border border-[color:var(--line)] text-[color:var(--text-muted)] transition hover:border-[color:var(--line-strong)] hover:text-[color:var(--text-primary)] disabled:opacity-40";
+  "inline-flex h-8 w-8 items-center justify-center border border-[color:var(--line)] text-[color:var(--text-muted)] transition hover:border-[color:var(--line-strong)] hover:text-[color:var(--text-primary)] disabled:opacity-40";
 const quietButtonStyles =
   "inline-flex min-h-9 items-center justify-center border border-[color:var(--line)] px-3 text-[11px] uppercase tracking-[0.16em] text-[color:var(--text-muted)] transition hover:border-[color:var(--line-strong)] hover:text-[color:var(--text-primary)]";
-const primaryButtonStyles =
-  "inline-flex min-h-10 items-center justify-center border border-[color:var(--accent-soft)] bg-[color:var(--accent-muted)] px-4 text-sm font-medium text-[color:var(--text-primary)] transition hover:border-[color:var(--accent-strong)] hover:bg-[color:var(--accent-soft)] disabled:cursor-not-allowed disabled:opacity-60";
 
 function IconActionButton({
   label,
@@ -381,7 +379,7 @@ function IconActionButton({
   outerClassName?: string;
 } & Omit<ButtonHTMLAttributes<HTMLButtonElement>, "children">) {
   return (
-    <div className={`group relative inline-flex ${outerClassName ?? ""}`}>
+    <div className={`group relative inline-flex shrink-0 ${outerClassName ?? ""}`}>
       <button
         {...props}
         title={label}
@@ -427,7 +425,7 @@ function MarkdownToolbar({
   ];
 
   return (
-    <div className="flex flex-wrap items-center gap-1.5 border-b border-[color:var(--line)] pb-3">
+    <div className="flex min-w-0 flex-nowrap items-center gap-1.5 overflow-hidden">
       {commands.map(({ command, label, Icon }) => (
         <IconActionButton
           key={command}
@@ -946,10 +944,8 @@ export function EntryEditor({
   protocolOptions,
   entityOptions,
   className,
-  formAction,
+  autosaveUrl,
   onChange,
-  submitLabel = "Save new version",
-  pendingLabel = "Saving...",
 }: EntryEditorProps) {
   const initialEditorBlocks = useMemo(
     () =>
@@ -962,6 +958,7 @@ export function EntryEditor({
   const [blocks, setBlocks] = useState<EntryEditorBlock[]>(initialEditorBlocks);
   const [previewVisible, setPreviewVisible] = useState(false);
   const [interactiveReady, setInteractiveReady] = useState(false);
+  const [insertMenuOpen, setInsertMenuOpen] = useState(false);
   const [activeTextBlockId, setActiveTextBlockId] = useState<string | null>(
     initialEditorBlocks.find(
       (block): block is EntryTextBlock => block.type === "text",
@@ -970,7 +967,23 @@ export function EntryEditor({
   const textBlockRefs = useRef<Record<string, HTMLTextAreaElement | null>>({});
   const textSelectionsRef = useRef<Record<string, TextSelection>>({});
   const pendingFocusRef = useRef<PendingFocusTarget | null>(null);
+  const insertMenuRef = useRef<HTMLDivElement | null>(null);
   const serializedValue = serializeEntryEditorValue(blocks);
+  const autosaveEnabled = Boolean(entryId && autosaveUrl);
+  const autosaveSnapshot = `${title}\u001f${serializedValue}`;
+  const [autosaveStatus, setAutosaveStatus] = useState<AutosaveStatus>(
+    autosaveEnabled ? "saved" : "idle",
+  );
+  const autosaveTimerRef = useRef<number | null>(null);
+  const autosaveInFlightRef = useRef(false);
+  const autosaveQueuedRef = useRef(false);
+  const runAutosaveRef = useRef<() => void>(() => undefined);
+  const latestAutosaveRef = useRef({
+    title,
+    blocksJson: serializedValue,
+    snapshot: autosaveSnapshot,
+  });
+  const lastSavedSnapshotRef = useRef(autosaveSnapshot);
   const activeTextBlock = useMemo(
     () =>
       blocks.find(
@@ -991,6 +1004,97 @@ export function EntryEditor({
     () => getSerializableEntryEditorBlocks(blocks).filter((block) => block.type !== "text").length,
     [blocks],
   );
+  const autosaveLabel =
+    autosaveStatus === "dirty"
+      ? "Unsaved changes"
+      : autosaveStatus === "saving"
+        ? "Saving..."
+        : autosaveStatus === "error"
+          ? "Autosave failed"
+          : autosaveStatus === "saved"
+            ? "Saved"
+            : "";
+  const autosaveStatusClassName =
+    autosaveStatus === "error"
+      ? "text-[color:var(--danger)]"
+      : autosaveStatus === "saving" || autosaveStatus === "dirty"
+        ? "text-[color:var(--text-muted)]"
+        : "text-[color:var(--text-soft)]";
+
+  const markDirty = useCallback(() => {
+    if (!autosaveEnabled) {
+      return;
+    }
+
+    setAutosaveStatus((current) =>
+      current === "saving" ? current : "dirty",
+    );
+  }, [autosaveEnabled]);
+
+  const runAutosave = useCallback(() => {
+    if (!entryId || !autosaveUrl) {
+      return;
+    }
+
+    const draft = latestAutosaveRef.current;
+
+    if (draft.snapshot === lastSavedSnapshotRef.current) {
+      setAutosaveStatus("saved");
+      return;
+    }
+
+    if (autosaveInFlightRef.current) {
+      autosaveQueuedRef.current = true;
+      return;
+    }
+
+    autosaveInFlightRef.current = true;
+    autosaveQueuedRef.current = false;
+    setAutosaveStatus("saving");
+
+    void fetch(autosaveUrl, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        title: draft.title,
+        blocksJson: draft.blocksJson,
+      }),
+    })
+      .then((response) => {
+        if (!response.ok) {
+          throw new Error("Autosave failed.");
+        }
+
+        lastSavedSnapshotRef.current = draft.snapshot;
+        if (latestAutosaveRef.current.snapshot === draft.snapshot) {
+          setAutosaveStatus("saved");
+        } else {
+          autosaveQueuedRef.current = true;
+          setAutosaveStatus("dirty");
+        }
+
+        return true;
+      })
+      .catch(() => {
+        setAutosaveStatus("error");
+        return false;
+      })
+      .then((saveSucceeded) => {
+        autosaveInFlightRef.current = false;
+
+        if (
+          saveSucceeded &&
+          (autosaveQueuedRef.current ||
+            latestAutosaveRef.current.snapshot !== lastSavedSnapshotRef.current) &&
+          latestAutosaveRef.current.snapshot !== lastSavedSnapshotRef.current
+        ) {
+          autosaveQueuedRef.current = false;
+          window.setTimeout(() => runAutosaveRef.current(), 0);
+        }
+      });
+  }, [entryId, autosaveUrl]);
 
   useEffect(() => {
     const frame = window.requestAnimationFrame(() => {
@@ -1001,6 +1105,101 @@ export function EntryEditor({
       window.cancelAnimationFrame(frame);
     };
   }, []);
+
+  useEffect(() => {
+    latestAutosaveRef.current = {
+      title,
+      blocksJson: serializedValue,
+      snapshot: autosaveSnapshot,
+    };
+  }, [autosaveSnapshot, serializedValue, title]);
+
+  useEffect(() => {
+    runAutosaveRef.current = runAutosave;
+  }, [runAutosave]);
+
+  useEffect(() => {
+    if (!autosaveEnabled || !interactiveReady) {
+      return;
+    }
+
+    if (autosaveSnapshot === lastSavedSnapshotRef.current) {
+      return;
+    }
+
+    if (autosaveTimerRef.current) {
+      window.clearTimeout(autosaveTimerRef.current);
+    }
+
+    autosaveTimerRef.current = window.setTimeout(() => {
+      autosaveTimerRef.current = null;
+      runAutosave();
+    }, 1200);
+
+    return () => {
+      if (autosaveTimerRef.current) {
+        window.clearTimeout(autosaveTimerRef.current);
+        autosaveTimerRef.current = null;
+      }
+    };
+  }, [autosaveEnabled, autosaveSnapshot, interactiveReady, runAutosave]);
+
+  useEffect(() => {
+    if (!autosaveEnabled) {
+      return;
+    }
+
+    function flushPendingAutosave() {
+      if (latestAutosaveRef.current.snapshot !== lastSavedSnapshotRef.current) {
+        runAutosave();
+      }
+    }
+
+    function handleVisibilityChange() {
+      if (document.visibilityState === "hidden") {
+        flushPendingAutosave();
+      }
+    }
+
+    window.addEventListener("blur", flushPendingAutosave);
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+
+    return () => {
+      window.removeEventListener("blur", flushPendingAutosave);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+    };
+  }, [autosaveEnabled, runAutosave]);
+
+  useEffect(() => {
+    if (!insertMenuOpen) {
+      return;
+    }
+
+    function handlePointerDown(event: PointerEvent) {
+      if (
+        event.target instanceof Node &&
+        insertMenuRef.current?.contains(event.target)
+      ) {
+        return;
+      }
+
+      setInsertMenuOpen(false);
+    }
+
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        setInsertMenuOpen(false);
+      }
+    }
+
+    window.addEventListener("pointerdown", handlePointerDown);
+    window.addEventListener("keydown", handleKeyDown);
+
+    return () => {
+      window.removeEventListener("pointerdown", handlePointerDown);
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [insertMenuOpen]);
 
   useEffect(() => {
     const pendingFocus = pendingFocusRef.current;
@@ -1042,6 +1241,7 @@ export function EntryEditor({
     pendingFocusRef.current = focusTarget ?? null;
     setBlocks(inlineBlocks);
     emitChange(inlineBlocks);
+    markDirty();
   }
 
   function updateTextBlock(blockId: string, content: string) {
@@ -1056,6 +1256,7 @@ export function EntryEditor({
 
     setBlocks(nextBlocks);
     emitChange(nextBlocks);
+    markDirty();
   }
 
   function updateEmbedBlock(
@@ -1193,83 +1394,117 @@ export function EntryEditor({
   }
 
   return (
-    <form action={formAction} className={className}>
+    <form
+      className={className}
+      onSubmit={(event) => {
+        event.preventDefault();
+      }}
+    >
       <input type="hidden" name="entryId" value={entryId} />
       <input type="hidden" name="blocksJson" value={serializedValue} />
 
-      <div className="space-y-8">
-        <section className="border-b border-[color:var(--line)] pb-5">
+      <div className="space-y-6">
+        <section className="border-b border-[color:var(--line)] pb-3">
           <input
             name="title"
             value={title}
-            onChange={(event) => setTitle(event.target.value)}
+            onChange={(event) => {
+              setTitle(event.target.value);
+              markDirty();
+            }}
             aria-label="Entry title"
-            className="w-full bg-transparent px-0 py-0 text-5xl font-semibold tracking-[-0.06em] text-[color:var(--text-primary)] outline-none placeholder:text-[color:var(--text-soft)]"
+            className="w-full bg-transparent px-0 py-0 text-xl font-bold text-[color:var(--text-primary)] outline-none placeholder:text-[color:var(--text-soft)]"
+            style={{ fontSize: "1.25rem", fontWeight: 700, lineHeight: "1.75rem" }}
             placeholder="Untitled entry"
           />
 
-          <div className="mt-4 flex flex-wrap items-center gap-2 text-[11px] uppercase tracking-[0.22em] text-[color:var(--text-soft)]">
-            <span>Document canvas</span>
-            <span className="text-[color:var(--line-strong)]">/</span>
-            <span>{insertableBlockCount} inline embeds</span>
-            <span className="ml-auto">
-              {previewVisible
-                ? "Preview mode"
-                : activeTextBlock
-                  ? "Insert at cursor"
-                  : "Focus a writing region"}
-            </span>
-          </div>
-
-          <div className="mt-4 space-y-3">
-            <div className="flex flex-wrap items-center gap-2">
-              <span className="font-mono text-[11px] uppercase tracking-[0.18em] text-[color:var(--text-soft)]">
+          <div className="mt-3 flex h-8 min-w-0 flex-nowrap items-center gap-2 overflow-hidden text-[11px] uppercase tracking-[0.18em] text-[color:var(--text-soft)]">
+            <span className="shrink-0 whitespace-nowrap">Document canvas</span>
+            <span className="shrink-0 text-[color:var(--line-strong)]">/</span>
+            <span className="shrink-0 whitespace-nowrap">{insertableBlockCount} inline embeds</span>
+            <span className="mx-1 h-5 w-px shrink-0 bg-[color:var(--line)]" />
+            <div ref={insertMenuRef} className="relative inline-flex shrink-0">
+              <button
+                type="button"
+                aria-haspopup="menu"
+                aria-expanded={insertMenuOpen}
+                onClick={() => setInsertMenuOpen((open) => !open)}
+                disabled={!interactiveReady || previewVisible}
+                className="inline-flex h-8 items-center justify-center gap-2 border border-[color:var(--line)] px-3 font-mono text-[11px] uppercase tracking-[0.18em] text-[color:var(--text-muted)] transition hover:border-[color:var(--line-strong)] hover:text-[color:var(--text-primary)] disabled:opacity-40"
+              >
                 Insert
-              </span>
-              <IconActionButton
-                type="button"
-                onClick={() =>
-                  insertInlineBlock(() =>
-                    createProtocolBlock(protocolOptions[0]?.id ?? ""),
-                  )
-                }
-                label="Insert protocol"
-                disabled={!interactiveReady || previewVisible}
-              >
-                <ProtocolBlockIcon className="h-4 w-4" />
-              </IconActionButton>
-              <IconActionButton
-                type="button"
-                onClick={() =>
-                  insertInlineBlock(() =>
-                    createEntityBlock(entityOptions[0]?.id ?? ""),
-                  )
-                }
-                label="Insert entity"
-                disabled={!interactiveReady || previewVisible}
-              >
-                <EntityBlockIcon className="h-4 w-4" />
-              </IconActionButton>
-              <IconActionButton
-                type="button"
-                onClick={() => insertInlineBlock(() => createTableBlock())}
-                label="Insert table"
-                disabled={!interactiveReady || previewVisible}
-              >
-                <TableBlockIcon className="h-4 w-4" />
-              </IconActionButton>
-              <p className="ml-auto max-w-xl text-right text-sm leading-6 text-[color:var(--text-muted)]">
-                Tables, linked entities, and reusable protocols now sit inside
-                the document flow instead of living in a separate lane below it.
-              </p>
-            </div>
+                <span className="text-[9px]" aria-hidden="true">
+                  v
+                </span>
+              </button>
 
-            <MarkdownToolbar
-              onApply={applyMarkdownCommand}
-              previewVisible={previewVisible}
-              onTogglePreview={togglePreview}
-              disabled={previewVisible || !activeTextBlock}
-            />
+              {insertMenuOpen && interactiveReady && !previewVisible ? (
+                <div
+                  role="menu"
+                  className="absolute left-0 top-full z-30 mt-1 min-w-[190px] border border-[color:var(--line)] bg-[color:var(--surface-strong)] p-1 shadow-xl"
+                >
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={() => {
+                      setInsertMenuOpen(false);
+                      insertInlineBlock(() =>
+                        createProtocolBlock(protocolOptions[0]?.id ?? ""),
+                      );
+                    }}
+                    className="flex w-full items-center gap-3 px-3 py-2 text-left text-sm normal-case tracking-normal text-[color:var(--text-primary)] transition hover:bg-[color:var(--surface-muted)]"
+                  >
+                    <ProtocolBlockIcon className="h-4 w-4 text-[color:var(--text-muted)]" />
+                    Protocol
+                  </button>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={() => {
+                      setInsertMenuOpen(false);
+                      insertInlineBlock(() =>
+                        createEntityBlock(entityOptions[0]?.id ?? ""),
+                      );
+                    }}
+                    className="flex w-full items-center gap-3 px-3 py-2 text-left text-sm normal-case tracking-normal text-[color:var(--text-primary)] transition hover:bg-[color:var(--surface-muted)]"
+                  >
+                    <EntityBlockIcon className="h-4 w-4 text-[color:var(--text-muted)]" />
+                    Entity
+                  </button>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={() => {
+                      setInsertMenuOpen(false);
+                      insertInlineBlock(() => createTableBlock());
+                    }}
+                    className="flex w-full items-center gap-3 px-3 py-2 text-left text-sm normal-case tracking-normal text-[color:var(--text-primary)] transition hover:bg-[color:var(--surface-muted)]"
+                  >
+                    <TableBlockIcon className="h-4 w-4 text-[color:var(--text-muted)]" />
+                    Table
+                  </button>
+                </div>
+              ) : null}
+            </div>
+            <span className="mx-1 h-5 w-px shrink-0 bg-[color:var(--line)]" />
+            <div className="min-w-0 flex-1 overflow-hidden">
+              <MarkdownToolbar
+                onApply={applyMarkdownCommand}
+                previewVisible={previewVisible}
+                onTogglePreview={togglePreview}
+                disabled={previewVisible || !activeTextBlock}
+              />
+            </div>
+            {autosaveEnabled ? (
+              <span
+                aria-label="Autosave status"
+                aria-live="polite"
+                role="status"
+                className={`ml-auto shrink-0 whitespace-nowrap font-mono text-[11px] uppercase tracking-[0.18em] ${autosaveStatusClassName}`}
+              >
+                {autosaveLabel}
+              </span>
+            ) : null}
           </div>
         </section>
 
@@ -1370,13 +1605,6 @@ export function EntryEditor({
           })}
         </section>
 
-        <div className="border-t border-[color:var(--line)] pt-5">
-          <SubmitButton
-            idleLabel={submitLabel}
-            pendingLabel={pendingLabel}
-            className={primaryButtonStyles}
-          />
-        </div>
       </div>
     </form>
   );

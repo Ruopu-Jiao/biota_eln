@@ -218,7 +218,17 @@ export function compactEntryEditorBlocks(
   });
 
   if (!filtered.length) {
-    return [createTextBlock()];
+    const firstTextBlock = normalizedBlocks.find(
+      (block): block is EntryTextBlock => block.type === "text",
+    );
+
+    return [
+      {
+        id: firstTextBlock?.id ?? "text-initial",
+        type: "text",
+        content: "",
+      },
+    ];
   }
 
   return filtered;

@@ -9,6 +9,8 @@ out
 build
 coverage
 dist
+target
+**/target
 playwright-report
 test-results
 
@@ -29,3 +31,16 @@ yarn-error.log*
 .vercel
 .local
 **/.local
+.biota/
+**/.biota/
+
+# local scientific-analysis development environments
+.venv
+**/.venv
+__pycache__
+**/__pycache__
+*.py[cod]
+*.egg-info/
+packages/analysis-engine/build/
+packages/analysis-engine/dist/
+apps/desktop/src-tauri/binaries/biota-analysis-engine-*

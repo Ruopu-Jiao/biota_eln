@@ -100,40 +100,40 @@ export function SignInForm() {
       />
 
       <div className="flex items-center justify-between gap-3 pt-1">
-        <label className="flex items-center gap-2 text-sm text-slate-300">
+        <label className="flex items-center gap-2 text-sm text-[color:var(--text-muted)]">
           <input
             type="checkbox"
             name="remember"
-            className="h-4 w-4 rounded border-white/20 bg-slate-950/70 text-emerald-400 focus:ring-emerald-400/20"
+            className="h-4 w-4 rounded border-[color:var(--line)] bg-[color:var(--surface-strong)] text-[color:var(--accent-strong)] focus:ring-[color:var(--accent-muted)]"
           />
           Remember me
         </label>
-        <span className="text-sm font-medium text-slate-500">
+        <span className="text-sm font-medium text-[color:var(--text-soft)]">
           Password recovery will land with auth flows.
         </span>
       </div>
 
       {errorMessage ? (
-        <p className="rounded-2xl border border-rose-400/20 bg-rose-400/10 px-4 py-3 text-sm text-rose-100">
+        <p className="rounded-[12px] border border-[color:var(--danger-soft)] bg-[color:var(--danger-soft)] px-4 py-3 text-sm text-[color:var(--text-primary)]">
           {errorMessage}
         </p>
       ) : null}
 
       {!errorMessage && registered ? (
-        <p className="rounded-2xl border border-emerald-400/20 bg-emerald-400/10 px-4 py-3 text-sm text-emerald-50">
+        <p className="rounded-[12px] border border-[color:var(--accent-soft)] bg-[color:var(--accent-muted)] px-4 py-3 text-sm text-[color:var(--text-primary)]">
           Your account is ready. Sign in to open your workspace.
         </p>
       ) : null}
 
       {demoMode ? (
-        <div className="space-y-3 rounded-2xl border border-emerald-400/20 bg-emerald-400/10 px-4 py-3 text-sm text-emerald-50">
+        <div className="space-y-3 rounded-[12px] border border-[color:var(--accent-soft)] bg-[color:var(--accent-muted)] px-4 py-3 text-sm text-[color:var(--text-primary)]">
           <p>
             Demo mode is active. Use the sample credentials below or continue
             directly into the demo workspace.
           </p>
           <a
             href="/api/demo-login"
-            className="inline-flex w-full items-center justify-center rounded-2xl border border-emerald-300/30 bg-emerald-300/12 px-4 py-3 text-sm font-semibold text-emerald-50 transition hover:bg-emerald-300/18 disabled:cursor-not-allowed disabled:opacity-70"
+            className="inline-flex w-full items-center justify-center rounded-[12px] border border-[color:var(--accent-soft)] bg-[color:var(--surface-strong)] px-4 py-3 text-sm font-semibold text-[color:var(--text-primary)] transition hover:bg-[color:var(--accent-muted)] disabled:cursor-not-allowed disabled:opacity-70"
           >
             Continue with demo workspace
           </a>
@@ -142,7 +142,7 @@ export function SignInForm() {
 
       <button
         type="submit"
-        className="inline-flex w-full items-center justify-center rounded-2xl bg-emerald-400 px-4 py-3 text-sm font-semibold text-slate-950 transition hover:bg-emerald-300 disabled:cursor-not-allowed disabled:opacity-70"
+        className="inline-flex w-full items-center justify-center rounded-[12px] bg-[color:var(--accent-strong)] px-4 py-3 text-sm font-semibold text-white transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-70"
         disabled={isSubmitting}
       >
         {isSubmitting ? "Signing in..." : "Sign in"}

@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import type { EntryBlock } from "@biota/db";
 import {
+  autosaveEntryDraftForUser,
   createEntryDraftForUser,
   createProtocolDraftForUser,
   updateEntryDraftForUser,
@@ -11,6 +12,7 @@ import {
 import { isDemoAuthMode } from "@/lib/auth/demo.server";
 import { requireServerSession } from "@/lib/auth/session";
 import {
+  autosaveDemoEntryDraft,
   createDemoEntryDraft,
   createDemoProtocolDraft,
   updateDemoEntryDraft,
@@ -241,4 +243,29 @@ export async function updateEntryDraftAction(formData: FormData) {
 
   revalidateNotebookSurfaces();
   revalidatePath(`/entries/${entryId}`);
+}
+
+export async function autosaveEntryDraftAction(formData: FormData) {
+  const session = await requireServerSession();
+  const entryId = readOptionalString(formData, "entryId").trim();
+
+  if (!entryId) {
+    return;
+  }
+
+  const input = {
+    entryId,
+    title: normalizeEntryTitle(readPresentString(formData, "title")),
+    summary: readPresentString(formData, "summary"),
+    blocks: parseEntryBlocksJson(formData),
+  };
+
+  if (isDemoAuthMode()) {
+    await autosaveDemoEntryDraft(input);
+  } else {
+    await autosaveEntryDraftForUser({
+      userId: session.user.id,
+      ...input,
+    });
+  }
 }

@@ -4,7 +4,11 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run src"
+  },
+  "dependencies": {
+    "@teselagen/bio-parsers": "^0.4.38"
   },
   "main": "./src/index.ts",
   "types": "./src/index.ts",

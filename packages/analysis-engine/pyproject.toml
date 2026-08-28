@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=75", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "biota-analysis-engine"
+version = "0.1.0"
+description = "Local reproducible statistics and curve-fitting engine for Biota"
+requires-python = ">=3.12"
+dependencies = [
+  "numpy>=2.2,<3",
+  "pandas>=3,<4",
+  "scipy>=1.15,<2",
+  "statsmodels>=0.14,<1",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pyinstaller>=6.12,<7",
+]
+
+[project.scripts]
+biota-analysis = "biota_analysis.__main__:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]

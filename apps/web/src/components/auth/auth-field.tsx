@@ -11,14 +11,18 @@ export function AuthField({ label, hint, id, ...props }: AuthFieldProps) {
 
   return (
     <label htmlFor={fieldId} className="block space-y-2">
-      <span className="block text-sm font-medium text-slate-100">{label}</span>
+      <span className="block text-sm font-medium text-[color:var(--text-primary)]">
+        {label}
+      </span>
       <input
         id={fieldId}
         {...props}
-        className="w-full rounded-2xl border border-white/10 bg-slate-950/70 px-4 py-3 text-sm text-slate-100 outline-none transition placeholder:text-slate-500 focus:border-emerald-300/40 focus:ring-2 focus:ring-emerald-400/15"
+        className="w-full rounded-[12px] border border-[color:var(--line)] bg-[color:var(--surface-strong)] px-4 py-3 text-sm text-[color:var(--text-primary)] outline-none transition placeholder:text-[color:var(--text-soft)] focus:border-[color:var(--accent-soft)] focus:ring-2 focus:ring-[color:var(--accent-muted)]"
       />
       {hint ? (
-        <span className="block text-xs text-slate-500">{hint}</span>
+        <span className="block text-xs text-[color:var(--text-soft)]">
+          {hint}
+        </span>
       ) : null}
     </label>
   );

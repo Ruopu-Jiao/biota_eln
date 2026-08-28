@@ -197,11 +197,146 @@ export interface UpdateEntryDraftInput {
   blocks: EntryBlock[];
 }
 
+export interface DeleteEntryInput {
+  userId: string;
+  entryId: string;
+}
+
 export interface CreateProtocolDraftInput {
   userId: string;
   title: string;
   summary?: string;
   bodyText?: string;
+}
+
+export const planningTaskStatuses = ["QUEUED", "SCHEDULED", "DONE"] as const;
+
+export type PlanningTaskStatusValue = (typeof planningTaskStatuses)[number];
+
+export type PlanningDateRangeSource = "explicit" | "derived" | null;
+
+export interface PlanningDateRange {
+  startDate: string | null;
+  endDate: string | null;
+  source: PlanningDateRangeSource;
+}
+
+export interface PlanningWhiteboardListItem {
+  id: string;
+  title: string;
+  slug: string;
+  updatedAt: Date;
+  projectCount: number;
+}
+
+export interface PlanningTaskEntryLinkItem {
+  id: string;
+  title: string;
+  slug: string;
+  latestVersionNumber: number;
+}
+
+export interface PlanningTaskItem extends PlanningDateRange {
+  id: string;
+  experimentId: string;
+  title: string;
+  notes: string | null;
+  status: PlanningTaskStatusValue;
+  sortOrder: number;
+  explicitStartDate: string | null;
+  explicitEndDate: string | null;
+  entryLinks: PlanningTaskEntryLinkItem[];
+}
+
+export interface PlanningExperimentItem extends PlanningDateRange {
+  id: string;
+  projectId: string;
+  title: string;
+  sortOrder: number;
+  explicitStartDate: string | null;
+  explicitEndDate: string | null;
+  tasks: PlanningTaskItem[];
+}
+
+export interface PlanningProjectItem extends PlanningDateRange {
+  id: string;
+  whiteboardId: string;
+  title: string;
+  sortOrder: number;
+  explicitStartDate: string | null;
+  explicitEndDate: string | null;
+  experiments: PlanningExperimentItem[];
+}
+
+export interface PlanningWhiteboardDetail {
+  id: string;
+  title: string;
+  slug: string;
+  updatedAt: Date;
+  projects: PlanningProjectItem[];
+}
+
+export interface CreatePlanningWhiteboardInput {
+  userId: string;
+  title: string;
+}
+
+export interface UpdatePlanningWhiteboardInput extends CreatePlanningWhiteboardInput {
+  whiteboardId: string;
+}
+
+export interface DeletePlanningWhiteboardInput {
+  userId: string;
+  whiteboardId: string;
+}
+
+export interface PlanningProjectMutationInput {
+  userId: string;
+  whiteboardId: string;
+  projectId?: string;
+  title: string;
+  startDate?: string | null;
+  endDate?: string | null;
+}
+
+export interface PlanningExperimentMutationInput {
+  userId: string;
+  projectId: string;
+  experimentId?: string;
+  title: string;
+  startDate?: string | null;
+  endDate?: string | null;
+}
+
+export interface PlanningTaskMutationInput {
+  userId: string;
+  experimentId: string;
+  taskId?: string;
+  title: string;
+  notes?: string | null;
+  status?: PlanningTaskStatusValue;
+  startDate?: string | null;
+  endDate?: string | null;
+  linkedEntryIds?: string[];
+}
+
+export interface DeletePlanningItemInput {
+  userId: string;
+  id: string;
+}
+
+export interface PlanningTaskOrderGroup {
+  experimentId: string;
+  status: PlanningTaskStatusValue;
+  taskIds: string[];
+}
+
+export interface ReorderPlanningTasksInput {
+  userId: string;
+  taskId: string;
+  targetExperimentId: string;
+  status: PlanningTaskStatusValue;
+  taskOrders: PlanningTaskOrderGroup[];
 }
 
 export interface RegistrationBootstrapInput {
@@ -225,6 +360,98 @@ function compactSlug(value: string) {
 
 function preferredSlug(value: string, fallback: string) {
   return compactSlug(value || fallback);
+}
+
+export function normalizePlanningDateInput(value: string | null | undefined) {
+  const trimmed = value?.trim();
+
+  if (!trimmed || !/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) {
+    return null;
+  }
+
+  const date = new Date(`${trimmed}T00:00:00.000Z`);
+
+  if (Number.isNaN(date.getTime()) || date.toISOString().slice(0, 10) !== trimmed) {
+    return null;
+  }
+
+  return trimmed;
+}
+
+export function normalizePlanningDateRange(
+  startDate: string | null | undefined,
+  endDate: string | null | undefined,
+) {
+  const normalizedStartDate = normalizePlanningDateInput(startDate);
+  const normalizedEndDate = normalizePlanningDateInput(endDate);
+
+  if (
+    normalizedStartDate &&
+    normalizedEndDate &&
+    normalizedEndDate < normalizedStartDate
+  ) {
+    return {
+      startDate: normalizedStartDate,
+      endDate: normalizedStartDate,
+    };
+  }
+
+  return {
+    startDate: normalizedStartDate,
+    endDate: normalizedEndDate,
+  };
+}
+
+export function derivePlanningDateRange(
+  explicitStartDate: string | null | undefined,
+  explicitEndDate: string | null | undefined,
+  childRanges: Array<Pick<PlanningDateRange, "startDate" | "endDate">>,
+): PlanningDateRange {
+  const explicitRange = normalizePlanningDateRange(
+    explicitStartDate,
+    explicitEndDate,
+  );
+
+  if (explicitRange.startDate || explicitRange.endDate) {
+    const startDate = explicitRange.startDate ?? explicitRange.endDate;
+    const endDate = explicitRange.endDate ?? explicitRange.startDate;
+
+    return {
+      startDate: startDate ?? null,
+      endDate: endDate ?? null,
+      source: "explicit",
+    };
+  }
+
+  const childDates = childRanges.flatMap((range) =>
+    [range.startDate, range.endDate].filter((date): date is string => Boolean(date)),
+  );
+
+  if (!childDates.length) {
+    return {
+      startDate: null,
+      endDate: null,
+      source: null,
+    };
+  }
+
+  childDates.sort();
+
+  return {
+    startDate: childDates[0] ?? null,
+    endDate: childDates[childDates.length - 1] ?? null,
+    source: "derived",
+  };
+}
+
+function planningDateToPrisma(value: string | null | undefined) {
+  const normalized = normalizePlanningDateInput(value);
+
+  return normalized ? new Date(`${normalized}T00:00:00.000Z`) : null;
+}
+
+function prismaDateToPlanningDay(value: Date | null | undefined) {
+  return value ? value.toISOString().slice(0, 10) : null;
 }
 
 function spreadsheetColumnLabel(index: number) {
@@ -494,6 +721,35 @@ async function uniqueProtocolSlug(
     });
 
     if (!existing) {
+      return candidate;
+    }
+
+    suffix += 1;
+    candidate = `${preferred}-${suffix}`;
+  }
+}
+
+async function uniquePlanningWhiteboardSlug(
+  client: DbClient,
+  repositoryId: string,
+  preferred: string,
+  ignoredWhiteboardId?: string,
+) {
+  let suffix = 0;
+  let candidate = preferred;
+
+  while (true) {
+    const existing = await client.planningWhiteboard.findUnique({
+      where: {
+        repositoryId_slug: {
+          repositoryId,
+          slug: candidate,
+        },
+      },
+      select: { id: true },
+    });
+
+    if (!existing || existing.id === ignoredWhiteboardId) {
       return candidate;
     }
 
@@ -1604,6 +1860,141 @@ export async function updateEntryDraftForUser(input: UpdateEntryDraftInput) {
   });
 }
 
+export async function autosaveEntryDraftForUser(input: UpdateEntryDraftInput) {
+  return prisma.$transaction(async (tx) => {
+    const context = await getNotebookContextForUserWithClient(tx, input.userId);
+
+    if (!context) {
+      throw new Error(`Cannot update an entry for user ${input.userId} without a workspace.`);
+    }
+
+    const entry = await tx.entry.findFirst({
+      where: {
+        id: input.entryId,
+        repositoryId: context.repository.id,
+        archivedAt: null,
+      },
+      select: {
+        id: true,
+        latestVersionNumber: true,
+      },
+    });
+
+    if (!entry) {
+      throw new Error(`Entry ${input.entryId} was not found in the current workspace.`);
+    }
+
+    const title = input.title.trim();
+    const explicitSummary = input.summary?.trim() || null;
+    const requestedProtocolIds = getLinkedProtocolIdsFromBlocks(input.blocks);
+    const protocols = requestedProtocolIds.length
+      ? await tx.protocol.findMany({
+          where: {
+            id: { in: requestedProtocolIds },
+            repositoryId: context.repository.id,
+            archivedAt: null,
+          },
+          select: {
+            id: true,
+            title: true,
+          },
+        })
+      : [];
+    const validProtocolIds = new Set(protocols.map((protocol) => protocol.id));
+    const protocolTitlesById = new Map(
+      protocols.map((protocol) => [protocol.id, protocol.title]),
+    );
+    const blocks = normalizeEntryBlocks(input.blocks, validProtocolIds);
+    const summary = explicitSummary ?? deriveEntrySummary(blocks, protocolTitlesById);
+    const bodyText = deriveEntryBodyText(blocks, protocolTitlesById);
+    const bodyJson = toEntryBlocksJson(blocks);
+
+    await tx.entry.update({
+      where: { id: entry.id },
+      data: {
+        title,
+        summary,
+        status: "DRAFT",
+        linkedProtocols: {
+          deleteMany: {},
+          create: getLinkedProtocolIdsFromBlocks(blocks).map(
+            (protocolId, sortOrder) => ({
+              protocolId,
+              sortOrder,
+            }),
+          ),
+        },
+      },
+    });
+
+    const updatedVersion = await tx.entryVersion.updateMany({
+      where: {
+        entryId: entry.id,
+        versionNumber: entry.latestVersionNumber,
+      },
+      data: {
+        title,
+        summary,
+        bodyText,
+        bodyJson,
+      },
+    });
+
+    if (!updatedVersion.count) {
+      await tx.entryVersion.create({
+        data: {
+          entryId: entry.id,
+          createdById: input.userId,
+          versionNumber: entry.latestVersionNumber,
+          title,
+          summary,
+          bodyText,
+          bodyJson,
+        },
+      });
+    }
+
+    return {
+      id: entry.id,
+      versionNumber: entry.latestVersionNumber,
+    };
+  });
+}
+
+export async function deleteEntryForUser(input: DeleteEntryInput) {
+  const context = await getNotebookContextForUser(input.userId);
+
+  if (!context) {
+    throw new Error(`Cannot delete an entry for user ${input.userId} without a workspace.`);
+  }
+
+  const entry = await prisma.entry.findFirst({
+    where: {
+      id: input.entryId,
+      repositoryId: context.repository.id,
+      archivedAt: null,
+    },
+    select: {
+      id: true,
+    },
+  });
+
+  if (!entry) {
+    throw new Error(`Entry ${input.entryId} was not found in the current workspace.`);
+  }
+
+  await prisma.entry.update({
+    where: { id: entry.id },
+    data: {
+      archivedAt: new Date(),
+    },
+  });
+
+  return {
+    id: entry.id,
+  };
+}
+
 export async function listProtocolsForUser(
   userId: string
 ): Promise<ProtocolListItem[]> {
@@ -1721,6 +2112,792 @@ export async function createProtocolDraftForUser(input: CreateProtocolDraftInput
     });
 
     return protocol;
+  });
+}
+
+const planningWhiteboardDetailInclude = {
+  projects: {
+    where: { archivedAt: null },
+    orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
+    include: {
+      experiments: {
+        where: { archivedAt: null },
+        orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
+        include: {
+          tasks: {
+            where: { archivedAt: null },
+            orderBy: [{ status: "asc" }, { sortOrder: "asc" }, { createdAt: "asc" }],
+            include: {
+              entryLinks: {
+                orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
+                include: {
+                  entry: {
+                    select: {
+                      id: true,
+                      title: true,
+                      slug: true,
+                      latestVersionNumber: true,
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+  },
+} satisfies Prisma.PlanningWhiteboardInclude;
+
+type PlanningWhiteboardRecord = Prisma.PlanningWhiteboardGetPayload<{
+  include: typeof planningWhiteboardDetailInclude;
+}>;
+
+type PlanningTaskRecord =
+  PlanningWhiteboardRecord["projects"][number]["experiments"][number]["tasks"][number];
+
+type PlanningExperimentRecord =
+  PlanningWhiteboardRecord["projects"][number]["experiments"][number];
+
+type PlanningProjectRecord = PlanningWhiteboardRecord["projects"][number];
+
+function normalizePlanningTitle(title: string, fallback: string) {
+  const trimmed = title.trim();
+
+  return trimmed || fallback;
+}
+
+function normalizePlanningStatus(
+  status: PlanningTaskStatusValue | null | undefined,
+) {
+  return planningTaskStatuses.includes(status as PlanningTaskStatusValue)
+    ? (status as PlanningTaskStatusValue)
+    : "QUEUED";
+}
+
+function mapPlanningTask(task: PlanningTaskRecord): PlanningTaskItem {
+  const explicitStartDate = prismaDateToPlanningDay(task.startDate);
+  const explicitEndDate = prismaDateToPlanningDay(task.endDate);
+  const range = derivePlanningDateRange(explicitStartDate, explicitEndDate, []);
+
+  return {
+    id: task.id,
+    experimentId: task.experimentId,
+    title: task.title,
+    notes: task.notes,
+    status: task.status,
+    sortOrder: task.sortOrder,
+    explicitStartDate,
+    explicitEndDate,
+    startDate: range.startDate,
+    endDate: range.endDate,
+    source: range.source,
+    entryLinks: task.entryLinks.map((link) => ({
+      id: link.entry.id,
+      title: link.entry.title,
+      slug: link.entry.slug,
+      latestVersionNumber: link.entry.latestVersionNumber,
+    })),
+  };
+}
+
+function mapPlanningExperiment(
+  experiment: PlanningExperimentRecord,
+): PlanningExperimentItem {
+  const tasks = experiment.tasks.map(mapPlanningTask);
+  const explicitStartDate = prismaDateToPlanningDay(experiment.startDate);
+  const explicitEndDate = prismaDateToPlanningDay(experiment.endDate);
+  const range = derivePlanningDateRange(explicitStartDate, explicitEndDate, tasks);
+
+  return {
+    id: experiment.id,
+    projectId: experiment.projectId,
+    title: experiment.title,
+    sortOrder: experiment.sortOrder,
+    explicitStartDate,
+    explicitEndDate,
+    startDate: range.startDate,
+    endDate: range.endDate,
+    source: range.source,
+    tasks,
+  };
+}
+
+function mapPlanningProject(project: PlanningProjectRecord): PlanningProjectItem {
+  const experiments = project.experiments.map(mapPlanningExperiment);
+  const explicitStartDate = prismaDateToPlanningDay(project.startDate);
+  const explicitEndDate = prismaDateToPlanningDay(project.endDate);
+  const range = derivePlanningDateRange(
+    explicitStartDate,
+    explicitEndDate,
+    experiments,
+  );
+
+  return {
+    id: project.id,
+    whiteboardId: project.whiteboardId,
+    title: project.title,
+    sortOrder: project.sortOrder,
+    explicitStartDate,
+    explicitEndDate,
+    startDate: range.startDate,
+    endDate: range.endDate,
+    source: range.source,
+    experiments,
+  };
+}
+
+function mapPlanningWhiteboard(
+  whiteboard: PlanningWhiteboardRecord,
+): PlanningWhiteboardDetail {
+  return {
+    id: whiteboard.id,
+    title: whiteboard.title,
+    slug: whiteboard.slug,
+    updatedAt: whiteboard.updatedAt,
+    projects: whiteboard.projects.map(mapPlanningProject),
+  };
+}
+
+async function getValidPlanningEntryIds(
+  client: DbClient,
+  repositoryId: string,
+  entryIds: string[],
+) {
+  const requestedEntryIds = Array.from(
+    new Set(entryIds.map((id) => id.trim()).filter(Boolean)),
+  );
+
+  if (!requestedEntryIds.length) {
+    return [];
+  }
+
+  const entries = await client.entry.findMany({
+    where: {
+      id: { in: requestedEntryIds },
+      repositoryId,
+      archivedAt: null,
+    },
+    select: { id: true },
+  });
+  const validEntryIds = new Set(entries.map((entry) => entry.id));
+
+  return requestedEntryIds.filter((entryId) => validEntryIds.has(entryId));
+}
+
+async function findPlanningWhiteboardForUser(
+  client: DbClient,
+  userId: string,
+  whiteboardId: string,
+) {
+  const context = await getNotebookContextForUserWithClient(client, userId);
+
+  if (!context) {
+    return null;
+  }
+
+  const whiteboard = await client.planningWhiteboard.findFirst({
+    where: {
+      id: whiteboardId,
+      repositoryId: context.repository.id,
+      archivedAt: null,
+    },
+    select: {
+      id: true,
+      repositoryId: true,
+    },
+  });
+
+  return whiteboard ? { context, whiteboard } : null;
+}
+
+async function findPlanningProjectForUser(
+  client: DbClient,
+  userId: string,
+  projectId: string,
+) {
+  const context = await getNotebookContextForUserWithClient(client, userId);
+
+  if (!context) {
+    return null;
+  }
+
+  const project = await client.planningProject.findFirst({
+    where: {
+      id: projectId,
+      archivedAt: null,
+      whiteboard: {
+        is: {
+          repositoryId: context.repository.id,
+          archivedAt: null,
+        },
+      },
+    },
+    select: {
+      id: true,
+      whiteboardId: true,
+    },
+  });
+
+  return project ? { context, project } : null;
+}
+
+async function findPlanningExperimentForUser(
+  client: DbClient,
+  userId: string,
+  experimentId: string,
+) {
+  const context = await getNotebookContextForUserWithClient(client, userId);
+
+  if (!context) {
+    return null;
+  }
+
+  const experiment = await client.planningExperiment.findFirst({
+    where: {
+      id: experimentId,
+      archivedAt: null,
+      project: {
+        is: {
+          archivedAt: null,
+          whiteboard: {
+            is: {
+              repositoryId: context.repository.id,
+              archivedAt: null,
+            },
+          },
+        },
+      },
+    },
+    select: {
+      id: true,
+      projectId: true,
+    },
+  });
+
+  return experiment ? { context, experiment } : null;
+}
+
+async function findPlanningTaskForUser(
+  client: DbClient,
+  userId: string,
+  taskId: string,
+) {
+  const context = await getNotebookContextForUserWithClient(client, userId);
+
+  if (!context) {
+    return null;
+  }
+
+  const task = await client.planningTask.findFirst({
+    where: {
+      id: taskId,
+      archivedAt: null,
+      experiment: {
+        is: {
+          archivedAt: null,
+          project: {
+            is: {
+              archivedAt: null,
+              whiteboard: {
+                is: {
+                  repositoryId: context.repository.id,
+                  archivedAt: null,
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+    select: {
+      id: true,
+      experimentId: true,
+    },
+  });
+
+  return task ? { context, task } : null;
+}
+
+export async function listPlanningWhiteboardsForUser(
+  userId: string,
+): Promise<PlanningWhiteboardListItem[]> {
+  const context = await getNotebookContextForUser(userId);
+
+  if (!context) {
+    return [];
+  }
+
+  const whiteboards = await prisma.planningWhiteboard.findMany({
+    where: {
+      repositoryId: context.repository.id,
+      archivedAt: null,
+    },
+    orderBy: [{ updatedAt: "desc" }, { createdAt: "asc" }],
+    include: {
+      projects: {
+        where: { archivedAt: null },
+        select: { id: true },
+      },
+    },
+  });
+
+  return whiteboards.map((whiteboard) => ({
+    id: whiteboard.id,
+    title: whiteboard.title,
+    slug: whiteboard.slug,
+    updatedAt: whiteboard.updatedAt,
+    projectCount: whiteboard.projects.length,
+  }));
+}
+
+export async function getPlanningWhiteboardForUser(
+  userId: string,
+  whiteboardId: string,
+): Promise<PlanningWhiteboardDetail | null> {
+  const context = await getNotebookContextForUser(userId);
+
+  if (!context) {
+    return null;
+  }
+
+  const whiteboard = await prisma.planningWhiteboard.findFirst({
+    where: {
+      id: whiteboardId,
+      repositoryId: context.repository.id,
+      archivedAt: null,
+    },
+    include: planningWhiteboardDetailInclude,
+  });
+
+  return whiteboard ? mapPlanningWhiteboard(whiteboard) : null;
+}
+
+export async function createPlanningWhiteboardForUser(
+  input: CreatePlanningWhiteboardInput,
+) {
+  return prisma.$transaction(async (tx) => {
+    const context = await getNotebookContextForUserWithClient(tx, input.userId);
+
+    if (!context) {
+      throw new Error(
+        `Cannot create a planning whiteboard for user ${input.userId} without a workspace.`,
+      );
+    }
+
+    const title = normalizePlanningTitle(input.title, "Untitled whiteboard");
+    const slug = await uniquePlanningWhiteboardSlug(
+      tx,
+      context.repository.id,
+      preferredSlug(title, "planning"),
+    );
+
+    return tx.planningWhiteboard.create({
+      data: {
+        repositoryId: context.repository.id,
+        title,
+        slug,
+      },
+    });
+  });
+}
+
+export async function updatePlanningWhiteboardForUser(
+  input: UpdatePlanningWhiteboardInput,
+) {
+  return prisma.$transaction(async (tx) => {
+    const target = await findPlanningWhiteboardForUser(
+      tx,
+      input.userId,
+      input.whiteboardId,
+    );
+
+    if (!target) {
+      throw new Error(`Planning whiteboard ${input.whiteboardId} was not found.`);
+    }
+
+    const title = normalizePlanningTitle(input.title, "Untitled whiteboard");
+    const slug = await uniquePlanningWhiteboardSlug(
+      tx,
+      target.context.repository.id,
+      preferredSlug(title, "planning"),
+      input.whiteboardId,
+    );
+
+    return tx.planningWhiteboard.update({
+      where: { id: target.whiteboard.id },
+      data: { title, slug },
+    });
+  });
+}
+
+export async function deletePlanningWhiteboardForUser(
+  input: DeletePlanningWhiteboardInput,
+) {
+  const target = await findPlanningWhiteboardForUser(
+    prisma,
+    input.userId,
+    input.whiteboardId,
+  );
+
+  if (!target) {
+    throw new Error(`Planning whiteboard ${input.whiteboardId} was not found.`);
+  }
+
+  return prisma.planningWhiteboard.update({
+    where: { id: target.whiteboard.id },
+    data: { archivedAt: new Date() },
+  });
+}
+
+export async function createPlanningProjectForUser(
+  input: PlanningProjectMutationInput,
+) {
+  return prisma.$transaction(async (tx) => {
+    const target = await findPlanningWhiteboardForUser(
+      tx,
+      input.userId,
+      input.whiteboardId,
+    );
+
+    if (!target) {
+      throw new Error(`Planning whiteboard ${input.whiteboardId} was not found.`);
+    }
+
+    const { startDate, endDate } = normalizePlanningDateRange(
+      input.startDate,
+      input.endDate,
+    );
+    const sortOrder = await tx.planningProject.count({
+      where: {
+        whiteboardId: target.whiteboard.id,
+        archivedAt: null,
+      },
+    });
+
+    return tx.planningProject.create({
+      data: {
+        whiteboardId: target.whiteboard.id,
+        title: normalizePlanningTitle(input.title, "Untitled project"),
+        startDate: planningDateToPrisma(startDate),
+        endDate: planningDateToPrisma(endDate),
+        sortOrder,
+      },
+    });
+  });
+}
+
+export async function updatePlanningProjectForUser(
+  input: PlanningProjectMutationInput & { projectId: string },
+) {
+  return prisma.$transaction(async (tx) => {
+    const target = await findPlanningProjectForUser(
+      tx,
+      input.userId,
+      input.projectId,
+    );
+
+    if (!target) {
+      throw new Error(`Planning project ${input.projectId} was not found.`);
+    }
+
+    const { startDate, endDate } = normalizePlanningDateRange(
+      input.startDate,
+      input.endDate,
+    );
+
+    return tx.planningProject.update({
+      where: { id: target.project.id },
+      data: {
+        title: normalizePlanningTitle(input.title, "Untitled project"),
+        startDate: planningDateToPrisma(startDate),
+        endDate: planningDateToPrisma(endDate),
+      },
+    });
+  });
+}
+
+export async function deletePlanningProjectForUser(input: DeletePlanningItemInput) {
+  const target = await findPlanningProjectForUser(prisma, input.userId, input.id);
+
+  if (!target) {
+    throw new Error(`Planning project ${input.id} was not found.`);
+  }
+
+  return prisma.planningProject.update({
+    where: { id: target.project.id },
+    data: { archivedAt: new Date() },
+  });
+}
+
+export async function createPlanningExperimentForUser(
+  input: PlanningExperimentMutationInput,
+) {
+  return prisma.$transaction(async (tx) => {
+    const target = await findPlanningProjectForUser(tx, input.userId, input.projectId);
+
+    if (!target) {
+      throw new Error(`Planning project ${input.projectId} was not found.`);
+    }
+
+    const { startDate, endDate } = normalizePlanningDateRange(
+      input.startDate,
+      input.endDate,
+    );
+    const sortOrder = await tx.planningExperiment.count({
+      where: {
+        projectId: target.project.id,
+        archivedAt: null,
+      },
+    });
+
+    return tx.planningExperiment.create({
+      data: {
+        projectId: target.project.id,
+        title: normalizePlanningTitle(input.title, "Untitled experiment"),
+        startDate: planningDateToPrisma(startDate),
+        endDate: planningDateToPrisma(endDate),
+        sortOrder,
+      },
+    });
+  });
+}
+
+export async function updatePlanningExperimentForUser(
+  input: PlanningExperimentMutationInput & { experimentId: string },
+) {
+  return prisma.$transaction(async (tx) => {
+    const target = await findPlanningExperimentForUser(
+      tx,
+      input.userId,
+      input.experimentId,
+    );
+
+    if (!target) {
+      throw new Error(`Planning experiment ${input.experimentId} was not found.`);
+    }
+
+    const { startDate, endDate } = normalizePlanningDateRange(
+      input.startDate,
+      input.endDate,
+    );
+
+    return tx.planningExperiment.update({
+      where: { id: target.experiment.id },
+      data: {
+        title: normalizePlanningTitle(input.title, "Untitled experiment"),
+        startDate: planningDateToPrisma(startDate),
+        endDate: planningDateToPrisma(endDate),
+      },
+    });
+  });
+}
+
+export async function deletePlanningExperimentForUser(
+  input: DeletePlanningItemInput,
+) {
+  const target = await findPlanningExperimentForUser(prisma, input.userId, input.id);
+
+  if (!target) {
+    throw new Error(`Planning experiment ${input.id} was not found.`);
+  }
+
+  return prisma.planningExperiment.update({
+    where: { id: target.experiment.id },
+    data: { archivedAt: new Date() },
+  });
+}
+
+export async function createPlanningTaskForUser(input: PlanningTaskMutationInput) {
+  return prisma.$transaction(async (tx) => {
+    const target = await findPlanningExperimentForUser(
+      tx,
+      input.userId,
+      input.experimentId,
+    );
+
+    if (!target) {
+      throw new Error(`Planning experiment ${input.experimentId} was not found.`);
+    }
+
+    const status = normalizePlanningStatus(input.status);
+    const { startDate, endDate } = normalizePlanningDateRange(
+      input.startDate,
+      input.endDate,
+    );
+    const sortOrder = await tx.planningTask.count({
+      where: {
+        experimentId: target.experiment.id,
+        status,
+        archivedAt: null,
+      },
+    });
+    const validEntryIds = await getValidPlanningEntryIds(
+      tx,
+      target.context.repository.id,
+      input.linkedEntryIds ?? [],
+    );
+
+    return tx.planningTask.create({
+      data: {
+        experimentId: target.experiment.id,
+        title: normalizePlanningTitle(input.title, "Untitled task"),
+        notes: input.notes?.trim() || null,
+        status,
+        startDate: planningDateToPrisma(startDate),
+        endDate: planningDateToPrisma(endDate),
+        sortOrder,
+        entryLinks: {
+          create: validEntryIds.map((entryId, index) => ({
+            entryId,
+            sortOrder: index,
+          })),
+        },
+      },
+    });
+  });
+}
+
+export async function updatePlanningTaskForUser(
+  input: PlanningTaskMutationInput & { taskId: string },
+) {
+  return prisma.$transaction(async (tx) => {
+    const target = await findPlanningTaskForUser(tx, input.userId, input.taskId);
+
+    if (!target) {
+      throw new Error(`Planning task ${input.taskId} was not found.`);
+    }
+
+    const { startDate, endDate } = normalizePlanningDateRange(
+      input.startDate,
+      input.endDate,
+    );
+    const validEntryIds = await getValidPlanningEntryIds(
+      tx,
+      target.context.repository.id,
+      input.linkedEntryIds ?? [],
+    );
+
+    return tx.planningTask.update({
+      where: { id: target.task.id },
+      data: {
+        title: normalizePlanningTitle(input.title, "Untitled task"),
+        notes: input.notes?.trim() || null,
+        status: normalizePlanningStatus(input.status),
+        startDate: planningDateToPrisma(startDate),
+        endDate: planningDateToPrisma(endDate),
+        entryLinks: {
+          deleteMany: {},
+          create: validEntryIds.map((entryId, index) => ({
+            entryId,
+            sortOrder: index,
+          })),
+        },
+      },
+    });
+  });
+}
+
+export async function deletePlanningTaskForUser(input: DeletePlanningItemInput) {
+  const target = await findPlanningTaskForUser(prisma, input.userId, input.id);
+
+  if (!target) {
+    throw new Error(`Planning task ${input.id} was not found.`);
+  }
+
+  return prisma.planningTask.update({
+    where: { id: target.task.id },
+    data: { archivedAt: new Date() },
+  });
+}
+
+export async function reorderPlanningTasksForUser(
+  input: ReorderPlanningTasksInput,
+) {
+  return prisma.$transaction(async (tx) => {
+    const target = await findPlanningExperimentForUser(
+      tx,
+      input.userId,
+      input.targetExperimentId,
+    );
+
+    if (!target) {
+      throw new Error(
+        `Planning experiment ${input.targetExperimentId} was not found.`,
+      );
+    }
+
+    const task = await findPlanningTaskForUser(tx, input.userId, input.taskId);
+
+    if (!task) {
+      throw new Error(`Planning task ${input.taskId} was not found.`);
+    }
+
+    await tx.planningTask.update({
+      where: { id: task.task.id },
+      data: {
+        experimentId: target.experiment.id,
+        status: normalizePlanningStatus(input.status),
+      },
+    });
+
+    const experimentIds = Array.from(
+      new Set(input.taskOrders.map((group) => group.experimentId)),
+    );
+    const validExperiments = await tx.planningExperiment.findMany({
+      where: {
+        id: { in: experimentIds },
+        archivedAt: null,
+        project: {
+          is: {
+            archivedAt: null,
+            whiteboard: {
+              is: {
+                repositoryId: target.context.repository.id,
+                archivedAt: null,
+              },
+            },
+          },
+        },
+      },
+      select: { id: true },
+    });
+    const validExperimentIds = new Set(
+      validExperiments.map((experiment) => experiment.id),
+    );
+
+    for (const group of input.taskOrders) {
+      if (!validExperimentIds.has(group.experimentId)) {
+        continue;
+      }
+
+      const status = normalizePlanningStatus(group.status);
+      const taskIds = Array.from(
+        new Set(group.taskIds.map((taskId) => taskId.trim()).filter(Boolean)),
+      );
+
+      await Promise.all(
+        taskIds.map((taskId, sortOrder) =>
+          tx.planningTask.updateMany({
+            where: {
+              id: taskId,
+              archivedAt: null,
+              experimentId: group.experimentId,
+            },
+            data: {
+              status,
+              sortOrder,
+            },
+          }),
+        ),
+      );
+    }
+
+    return {
+      id: input.taskId,
+      experimentId: target.experiment.id,
+      status: normalizePlanningStatus(input.status),
+    };
   });
 }
 

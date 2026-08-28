@@ -9,6 +9,13 @@
   ],
   "scripts": {
     "dev": "npm run dev --workspace @biota/web",
+    "desktop:dev": "npm run tauri:dev --workspace @biota/desktop",
+    "desktop:ui": "npm run dev --workspace @biota/desktop",
+    "desktop:build": "npm run tauri:build --workspace @biota/desktop",
+    "desktop:check": "npm run typecheck --workspace @biota/vault && npm run test --workspace @biota/vault && npm run typecheck --workspace @biota/bio && npm run test --workspace @biota/bio && npm run typecheck --workspace @biota/desktop && npm run test --workspace @biota/desktop && npm run build --workspace @biota/desktop && (cd packages/analysis-engine && .venv/bin/python -m unittest discover -s tests) && cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml && cargo clippy --all-targets --manifest-path apps/desktop/src-tauri/Cargo.toml -- -D warnings && cargo fmt --manifest-path apps/desktop/src-tauri/Cargo.toml -- --check && node --test scripts/migrate-legacy-vault.test.mjs",
+    "analysis:build": "npm run sidecar:build --workspace @biota/desktop",
+    "analysis:test": "npm run analysis:build && (cd packages/analysis-engine && .venv/bin/python -m unittest discover -s tests)",
+    "migration:test": "node --test scripts/migrate-legacy-vault.test.mjs",
     "build": "npm run build --workspaces --if-present",
     "lint": "npm run lint --workspaces --if-present",
     "typecheck": "npm run typecheck --workspaces --if-present",

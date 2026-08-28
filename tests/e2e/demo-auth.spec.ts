@@ -3,7 +3,7 @@ import { expect, test } from "@playwright/test";
 test("demo mode can open the workspace without a database", async ({ page }) => {
   await page.goto("/sign-in?demo=1");
 
-  await page.getByRole("link", { name: "Continue with demo workspace" }).click();
+  await page.getByRole("link", { name: "Log in with demo account" }).click();
 
   await expect(page).toHaveURL(/\/entries(\/.+)?$/);
   await expect(page.locator("body")).toContainText(/Demo workspace/i);

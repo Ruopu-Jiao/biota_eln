@@ -137,7 +137,10 @@ const DNA_COMPLEMENT: Record<string, string> = {
 };
 
 export function normalizeDnaSequence(sequence: string) {
-  return sequence.replace(/[^A-Za-z]/g, "").toUpperCase().replaceAll("U", "T");
+  return sequence
+    .replace(/[^A-Za-z]/g, "")
+    .toUpperCase()
+    .replaceAll("U", "T");
 }
 
 export function complementBase(base: string) {
@@ -158,7 +161,9 @@ export function gcContent(sequence: string) {
     return 0;
   }
 
-  const gcCount = normalized.split("").filter((base) => base === "G" || base === "C").length;
+  const gcCount = normalized
+    .split("")
+    .filter((base) => base === "G" || base === "C").length;
   return (gcCount / normalized.length) * 100;
 }
 
@@ -207,11 +212,16 @@ export function rotateSequence(sequence: string, offset: number) {
     return normalized;
   }
 
-  const shift = ((offset % normalized.length) + normalized.length) % normalized.length;
+  const shift =
+    ((offset % normalized.length) + normalized.length) % normalized.length;
   return `${normalized.slice(shift)}${normalized.slice(0, shift)}`;
 }
 
-export function rotatePosition(position: number, offset: number, sequenceLength: number) {
+export function rotatePosition(
+  position: number,
+  offset: number,
+  sequenceLength: number
+) {
   const zeroBased = position - 1;
   const shift = ((offset % sequenceLength) + sequenceLength) % sequenceLength;
   return ((zeroBased - shift + sequenceLength) % sequenceLength) + 1;
@@ -221,7 +231,7 @@ export function sliceSequenceRange(
   sequence: string,
   start: number,
   end: number,
-  topology: SequenceTopology = "linear",
+  topology: SequenceTopology = "linear"
 ) {
   const normalized = normalizeDnaSequence(sequence);
 
@@ -239,7 +249,7 @@ export function sliceSequenceRange(
 export function rotateFeatureRange(
   range: FeatureRange,
   offset: number,
-  sequenceLength: number,
+  sequenceLength: number
 ) {
   return {
     start: rotatePosition(range.start, offset, sequenceLength),
@@ -247,7 +257,10 @@ export function rotateFeatureRange(
   };
 }
 
-export function featureLength(feature: Pick<DNAFeature, "start" | "end">, sequenceLength: number) {
+export function featureLength(
+  feature: Pick<DNAFeature, "start" | "end">,
+  sequenceLength: number
+) {
   if (feature.start <= feature.end) {
     return feature.end - feature.start + 1;
   }
@@ -257,7 +270,7 @@ export function featureLength(feature: Pick<DNAFeature, "start" | "end">, sequen
 
 export function splitCircularFeatureRange(
   range: FeatureRange,
-  sequenceLength: number,
+  sequenceLength: number
 ): FeatureRange[] {
   if (range.start <= range.end) {
     return [range];
@@ -269,7 +282,10 @@ export function splitCircularFeatureRange(
   ];
 }
 
-export function invertFeature(feature: DNAFeature, sequenceLength: number): DNAFeature {
+export function invertFeature(
+  feature: DNAFeature,
+  sequenceLength: number
+): DNAFeature {
   return {
     ...feature,
     strand: feature.strand === 1 ? -1 : 1,
@@ -311,8 +327,13 @@ export function translateDna(sequence: string, frame = 0) {
 
 export function estimatePrimerTm(sequence: string) {
   const normalized = normalizeDnaSequence(sequence);
-  const atCount = normalized.split("").filter((base) => base === "A" || base === "T").length;
+  const atCount = normalized
+    .split("")
+    .filter((base) => base === "A" || base === "T").length;
   const gcCount = normalized.length - atCount;
 
   return 2 * atCount + 4 * gcCount;
 }
+
+export * from "./studio";
+export * from "./sequence-io";
